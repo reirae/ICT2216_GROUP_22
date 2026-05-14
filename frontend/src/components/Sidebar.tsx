@@ -1,0 +1,102 @@
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import {
+  Home, CreditCard, Users, Settings, LogOut, Menu, X, Shield, TrendingUp, ScrollText,
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+
+interface Item { to: string; label: string; icon: any }
+
+const userItems: Item[] = [
+  { to: '/dashboard',    label: 'Dashboard',      icon: Home },
+  { to: '/transactions', label: 'Transactions',   icon: TrendingUp },
+  { to: '/recipients',   label: 'Recipients',     icon: Users },
+  { to: '/transfer',     label: 'Transfer Funds', icon: CreditCard },
+  { to: '/profile',      label: 'Profile',        icon: Settings },
+];
+
+const adminItems: Item[] = [
+  { to: '/admin/users',        label: 'User Management',     icon: Users },
+  { to: '/admin/transactions', label: 'All Transactions',    icon: TrendingUp },
+  { to: '/admin/logs',         label: 'Audit Logs',          icon: ScrollText },
+];
+
+export function Sidebar() {
+  const { user, logout } = useAuth();
+  const nav = useNavigate();
+  const [open, setOpen] = useState(false);
+  if (!user) return null;
+  const items = user.role === 'admin' ? adminItems : userItems;
+
+  const handleLogout = async () => {
+    await logout();
+    nav(user.role === 'admin' ? '/admin/login' : '/login', { replace: true });
+  };
+
+  return (
+    <>
+      <div className="lg:hidden bg-blue-600 text-white p-4 flex items-center justify-between">
+        <div className="flex items-center">
+          <Shield className="w-8 h-8 mr-2" />
+          <span className="text-xl">SecureBank</span>
+        </div>
+        <button onClick={() => setOpen(!open)} aria-label="Toggle menu">
+          {open ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`${open ? 'block' : 'hidden'} lg:block fixed lg:sticky top-0 left-0 h-screen w-72 bg-white shadow-lg z-40 flex flex-col`}
+      >
+        <div className="flex-shrink-0 p-6 hidden lg:block">
+          <div className="flex items-center mb-8">
+            <Shield className="w-10 h-10 text-blue-600 mr-3" />
+            <h1 className="text-2xl text-blue-600">SecureBank</h1>
+          </div>
+        </div>
+
+        <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
+          {items.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center px-4 py-3 rounded-lg transition-colors ${
+                  isActive ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+                }`
+              }
+            >
+              <Icon className="w-5 h-5 mr-3 flex-shrink-0" />
+              <span className="whitespace-nowrap">{label}</span>
+            </NavLink>
+          ))}
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          >
+            <LogOut className="w-5 h-5 mr-3" />
+            <span>Logout</span>
+          </button>
+        </nav>
+
+        <div className="flex-shrink-0 p-4 pb-6">
+          <div className="bg-blue-50 rounded-lg p-4">
+            <p className="text-sm text-gray-600">Logged in as:</p>
+            <p className="text-gray-800">{user.first_name} {user.last_name}</p>
+            {user.role === 'user' && user.account_number && (
+              <p className="text-xs text-gray-500 mt-1">Acc: {user.account_number}</p>
+            )}
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}

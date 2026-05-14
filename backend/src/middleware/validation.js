@@ -1,0 +1,43 @@
+const { validationResult } = require('express-validator');
+
+// Validation regex patterns reused on backend (frontend mirrors these).
+const PATTERNS = {
+  username: /^[a-zA-Z][a-zA-Z0-9._-]{2,49}$/,
+  email: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,
+  password: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,128}$/,
+  phone: /^\+?[0-9]{8,15}$/,
+  name: /^[a-zA-Z][a-zA-Z\s'-]{0,49}$/,
+  accountNumber: /^[0-9]{10,20}$/,
+  amount: /^\d{1,13}(\.\d{1,2})?$/,
+};
+
+function handleValidation(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: errors.array().map((e) => ({ field: e.path, msg: e.msg })),
+    });
+  }
+  next();
+}
+
+// Lightweight CAPTCHA verification stub.
+// Replace with hCaptcha/reCAPTCHA server-side verification in production.
+// The frontend currently sends an arithmetic-question answer that the
+// session has cached under req.session.captchaAnswer.
+function verifyCaptcha(req, res, next) {
+  const provided = (req.body.captcha || '').toString().trim();
+  const expected = req.session && req.session.captchaAnswer;
+  if (!expected) {
+    return res.status(400).json({ error: 'Captcha expired, please refresh.' });
+  }
+  if (provided !== String(expected)) {
+    return res.status(400).json({ error: 'Captcha is incorrect.' });
+  }
+  // Single use - clear after verification.
+  delete req.session.captchaAnswer;
+  next();
+}
+
+module.exports = { PATTERNS, handleValidation, verifyCaptcha };

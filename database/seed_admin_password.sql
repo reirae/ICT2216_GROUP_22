@@ -1,0 +1,12 @@
+-- NOTE
+-- The Securebank.sql dump ships with a placeholder bcrypt hash for the
+-- `admin` account (and all seed users) that does not correspond to a
+-- known plaintext.
+--
+-- Instead of running this SQL directly, run the Node seed helper from the
+-- backend directory, which computes valid bcrypt hashes for you:
+--
+--     cd backend
+--     node scripts/seedPasswords.js
+--
+-- This file is intentionally a no-op placeholder for documentation.

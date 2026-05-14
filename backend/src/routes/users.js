@@ -1,0 +1,262 @@
+const express = require('express');
+const bcrypt = require('bcrypt');
+const { body } = require('express-validator');
+const { pool } = require('../config/database');
+const { requireAuth } = require('../middleware/auth');
+const { writeLog } = require('../utils/logger');
+const { handleValidation, PATTERNS } = require('../middleware/validation');
+
+const router = express.Router();
+const BCRYPT_ROUNDS = 12;
+
+// Dashboard summary: balance + recent transactions.
+router.get('/dashboard', requireAuth('user'), async (req, res) => {
+  const userId = req.session.user.id;
+  try {
+    const [[user]] = await pool.execute(
+      'SELECT first_name, last_name, account_number, balance, status FROM users WHERE user_id = ?',
+      [userId]
+    );
+    const [recent] = await pool.execute(
+      'SELECT transaction_id, recipient_id, type, amount, description, created_at FROM transaction_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+      [userId]
+    );
+    res.json({ user, recent });
+  } catch (err) {
+    console.error('[dashboard]', err);
+    res.status(500).json({ error: 'Failed to load dashboard' });
+  }
+});
+
+// Profile.
+router.get('/profile', requireAuth('user'), async (req, res) => {
+  try {
+    const [[user]] = await pool.execute(
+      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at FROM users WHERE user_id = ?',
+      [req.session.user.id]
+    );
+    res.json({ user });
+  } catch (err) {
+    console.error('[profile]', err);
+    res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+// Change password.
+router.put(
+  '/password',
+  requireAuth('user'),
+  [
+    body('current_password').isString().isLength({ min: 1, max: 128 }),
+    body('new_password').matches(PATTERNS.password).withMessage('New password too weak'),
+  ],
+  handleValidation,
+  async (req, res) => {
+    const userId = req.session.user.id;
+    const { current_password, new_password } = req.body;
+    try {
+      const [[row]] = await pool.execute(
+        'SELECT password_hash FROM users WHERE user_id = ?',
+        [userId]
+      );
+      if (!row || !(await bcrypt.compare(current_password, row.password_hash))) {
+        await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'failure' });
+        return res.status(400).json({ error: 'Current password is incorrect' });
+      }
+      const newHash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
+      await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
+      await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'success' });
+      res.json({ message: 'Password updated' });
+    } catch (err) {
+      console.error('[password]', err);
+      res.status(500).json({ error: 'Failed to change password' });
+    }
+  }
+);
+
+// Transaction history.
+router.get('/transactions', requireAuth('user'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT t.transaction_id, t.type, t.amount, t.description, t.created_at,
+              t.recipient_id,
+              CONCAT_WS(' ', r.first_name, r.last_name) AS recipient_name,
+              r.account_number AS recipient_account
+         FROM transaction_history t
+         LEFT JOIN users r ON r.user_id = t.recipient_id
+        WHERE t.user_id = ?
+        ORDER BY t.created_at DESC`,
+      [req.session.user.id]
+    );
+    res.json({ transactions: rows });
+  } catch (err) {
+    console.error('[transactions]', err);
+    res.status(500).json({ error: 'Failed to load transactions' });
+  }
+});
+
+// Saved recipients.
+router.get('/recipients', requireAuth('user'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT ur.user_recipient_id, ur.recipient_id, ur.created_at,
+              u.first_name, u.last_name, u.account_number
+         FROM user_recipients ur
+         JOIN users u ON u.user_id = ur.recipient_id
+        WHERE ur.user_id = ?
+        ORDER BY ur.created_at DESC`,
+      [req.session.user.id]
+    );
+    res.json({ recipients: rows });
+  } catch (err) {
+    console.error('[recipients]', err);
+    res.status(500).json({ error: 'Failed to load recipients' });
+  }
+});
+
+router.post(
+  '/recipients',
+  requireAuth('user'),
+  [body('identifier').isString().isLength({ min: 6, max: 30 })],
+  handleValidation,
+  async (req, res) => {
+    const userId = req.session.user.id;
+    const identifier = req.body.identifier.trim();
+    try {
+      const [[recipient]] = await pool.execute(
+        `SELECT user_id FROM users
+          WHERE (account_number = ? OR phone_number = ?) AND status = 'active'
+          LIMIT 1`,
+        [identifier, identifier]
+      );
+      if (!recipient) return res.status(404).json({ error: 'No active account found for that identifier' });
+      if (recipient.user_id === userId) return res.status(400).json({ error: 'You cannot add yourself' });
+
+      await pool.execute(
+        'INSERT IGNORE INTO user_recipients (user_id, recipient_id) VALUES (?, ?)',
+        [userId, recipient.user_id]
+      );
+      await writeLog({ userId, userRole: 'user', action: 'BENEFICIARY_ADDED', status: 'success' });
+      res.status(201).json({ message: 'Recipient saved' });
+    } catch (err) {
+      console.error('[recipients-add]', err);
+      res.status(500).json({ error: 'Failed to add recipient' });
+    }
+  }
+);
+
+router.delete('/recipients/:id', requireAuth('user'), async (req, res) => {
+  const userId = req.session.user.id;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const [result] = await pool.execute(
+      'DELETE FROM user_recipients WHERE user_recipient_id = ? AND user_id = ?',
+      [id, userId]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Recipient not found' });
+    await writeLog({ userId, userRole: 'user', action: 'BENEFICIARY_REMOVED', status: 'success' });
+    res.json({ message: 'Recipient removed' });
+  } catch (err) {
+    console.error('[recipients-del]', err);
+    res.status(500).json({ error: 'Failed to remove recipient' });
+  }
+});
+
+// Lookup recipient by account number or phone (used by transfer form).
+router.get('/lookup', requireAuth('user'), async (req, res) => {
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.status(400).json({ error: 'Missing query' });
+  try {
+    const [[hit]] = await pool.execute(
+      `SELECT user_id, first_name, last_name, account_number
+         FROM users
+        WHERE (account_number = ? OR phone_number = ?) AND status = 'active'
+          AND user_id <> ?
+        LIMIT 1`,
+      [q, q, req.session.user.id]
+    );
+    if (!hit) return res.status(404).json({ error: 'No active account found' });
+    res.json({ recipient: hit });
+  } catch (err) {
+    console.error('[lookup]', err);
+    res.status(500).json({ error: 'Lookup failed' });
+  }
+});
+
+// Fund transfer.
+router.post(
+  '/transfer',
+  requireAuth('user'),
+  [
+    body('recipient_id').isInt({ min: 1 }),
+    body('amount').matches(PATTERNS.amount),
+    body('description').optional({ checkFalsy: true }).isString().isLength({ max: 255 }),
+  ],
+  handleValidation,
+  async (req, res) => {
+    const userId = req.session.user.id;
+    const recipientId = Number(req.body.recipient_id);
+    const amount = Number.parseFloat(req.body.amount);
+    const description = (req.body.description || 'Fund transfer').toString();
+
+    if (recipientId === userId) return res.status(400).json({ error: 'Cannot transfer to yourself' });
+    if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be positive' });
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [[sender]] = await conn.execute(
+        'SELECT user_id, balance, status FROM users WHERE user_id = ? FOR UPDATE',
+        [userId]
+      );
+      const [[recipient]] = await conn.execute(
+        'SELECT user_id, status FROM users WHERE user_id = ? FOR UPDATE',
+        [recipientId]
+      );
+      if (!sender || sender.status !== 'active') {
+        await conn.rollback();
+        return res.status(403).json({ error: 'Your account is not active' });
+      }
+      if (!recipient || recipient.status !== 'active') {
+        await conn.rollback();
+        return res.status(404).json({ error: 'Recipient is not available' });
+      }
+      if (Number(sender.balance) < amount) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Insufficient balance' });
+      }
+
+      await conn.execute(
+        'UPDATE users SET balance = balance - ? WHERE user_id = ?',
+        [amount, userId]
+      );
+      await conn.execute(
+        'UPDATE users SET balance = balance + ? WHERE user_id = ?',
+        [amount, recipientId]
+      );
+      await conn.execute(
+        `INSERT INTO transaction_history (user_id, recipient_id, type, amount, description)
+         VALUES (?, ?, 'debit', ?, ?)`,
+        [userId, recipientId, amount, description]
+      );
+      await conn.execute(
+        `INSERT INTO transaction_history (user_id, recipient_id, type, amount, description)
+         VALUES (?, ?, 'credit', ?, ?)`,
+        [recipientId, userId, amount, description]
+      );
+      await conn.commit();
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'success' });
+      res.json({ message: 'Transfer completed' });
+    } catch (err) {
+      await conn.rollback();
+      console.error('[transfer]', err);
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      res.status(500).json({ error: 'Transfer failed' });
+    } finally {
+      conn.release();
+    }
+  }
+);
+
+module.exports = router;
