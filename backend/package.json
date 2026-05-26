@@ -9,6 +9,8 @@
     "dev": "nodemon src/server.js"
   },
   "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
     "bcrypt": "^5.1.1",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.6",
@@ -20,11 +22,18 @@
     "express-validator": "^7.1.0",
     "helmet": "^7.1.0",
     "mysql2": "^3.10.0",
+    "nodemailer": "^8.0.7",
     "qrcode": "^1.5.3",
+    "react-email": "^6.1.5",
     "twilio": "^6.0.2"
   },
   "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/nodemailer": "^8.0.0",
+    "@types/react": "^19.2.15",
     "nodemon": "^3.1.14",
-    "tunnel-ssh": "^5.1.2"
+    "ts-node": "^10.9.2",
+    "tunnel-ssh": "^5.1.2",
+    "typescript": "^6.0.3"
   }
 }
