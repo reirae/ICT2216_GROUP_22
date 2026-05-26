@@ -47,9 +47,9 @@ export default function Login() {
       setBusy(true);
       try {
         const response = await api.post<{ requires2FA?: boolean; user?: any }>('/auth/login', { username, password, captcha });
-        
+
         if (response && response.requires2FA) {
-          setRequires2FA(true); 
+          setRequires2FA(true);
           setCooldown(30);
           // ✅ Don't call login() again — session already has pendingUser stored
         } else if (response && response.user) {
@@ -62,7 +62,7 @@ export default function Login() {
       } finally {
         setBusy(false);
       }
-    } 
+    }
     // STAGE 2: 2FA Verification Submission
     else {
       if (!otp || otp.length !== 6) {
@@ -88,7 +88,7 @@ export default function Login() {
     setBusy(true);
     try {
       // Point to the new resend-otp route
-      await api.post('/auth/resend-otp', {}); 
+      await api.post('/auth/resend-otp', {});
       setOtp('');
       setCooldown(30); // You can set this to 30s as you requested!
     } catch (err: any) {
@@ -120,9 +120,9 @@ export default function Login() {
           <h2 className="text-xl sm:text-2xl text-gray-800 text-center mb-6">
             {requires2FA ? 'Security Verification' : 'Sign In'}
           </h2>
-          
+
           <form onSubmit={onSubmit} className="space-y-4" autoComplete="on">
-            
+
             {!requires2FA ? (
               <>
                 <div>
@@ -217,10 +217,10 @@ export default function Login() {
             {requires2FA && (
               <button
                 type="button"
-                onClick={() => { 
-                  setRequires2FA(false); 
-                  setOtp(''); 
-                  setError(''); 
+                onClick={() => {
+                  setRequires2FA(false);
+                  setOtp('');
+                  setError('');
                   // SECURITY FIX: Wipe credentials when backing out
                   setUsername('');
                   setPassword('');
@@ -239,6 +239,11 @@ export default function Login() {
               <div className="mt-6 text-center text-sm sm:text-base text-gray-600">
                 Don't have an account?{' '}
                 <Link to="/register" className="text-blue-600 hover:underline">Register here</Link>
+              </div>
+              <div className="mt-6 text-center text-sm sm:text-base text-gray-600">
+                <Link to="/reset-password" className="text-blue-600 hover:underline text-sm">
+                  Forgot password?
+                </Link>
               </div>
               <div className="mt-4 text-center text-xs text-gray-500">
                 <Link to="/admin/login" className="hover:underline">Admin sign in</Link>

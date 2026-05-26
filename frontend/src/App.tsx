@@ -12,6 +12,7 @@ import AdminTransactions from './pages/admin/AdminTransactions';
 import AdminLogs from './pages/admin/AdminLogs';
 import { AppLayout } from './components/AppLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import ResetPassword from './pages/ResetPassword';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/admin/login" element={<AdminLogin />} />
 
       <Route

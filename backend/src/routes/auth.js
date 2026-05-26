@@ -6,6 +6,7 @@ const { writeLog } = require('../utils/logger');
 const { loginLimiter } = require('../middleware/rateLimiter');
 const { handleValidation, verifyCaptcha, PATTERNS } = require('../middleware/validation');
 const { requireAuth } = require('../middleware/auth');
+const { sendOtpEmail, verifyOtp } = require("../utils/otp");
 
 const crypto = require('crypto');
 const { sendOTP } = require('../utils/sms');
@@ -324,5 +325,55 @@ function generateAccountNumber() {
   for (let i = 0; i < 10; i++) n += Math.floor(Math.random() * 10).toString();
   return n;
 }
+
+router.post('/check-email', async (req, res) => {
+  const { email } = req.body;
+  const [rows] = await pool.execute(
+    'SELECT username FROM users WHERE email = ? LIMIT 1',
+    [email]
+  );
+  if (!rows.length) return res.json({ exists: false });
+  res.json({ exists: true, username: rows[0].username });
+});
+
+router.post('/reset-password', async (req, res) => {
+  const { email, newPassword } = req.body;
+  const password_hash = await bcrypt.hash(newPassword, 12);
+  await pool.execute(
+    'UPDATE users SET password_hash = ? WHERE email = ?',
+    [password_hash, email]
+  );
+  res.json({ message: 'Password reset successfully' });
+});
+
+// POST /api/auth/send-otp
+router.post("/email-send-otp", async (req, res) => {
+  try {
+    const { email, username } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required" });
+
+    await sendOtpEmail(email, username);
+    res.json({ message: "OTP sent successfully" });
+  } catch (err) {
+    console.error("Failed to send OTP:", err);
+    res.status(500).json({ error: "Failed to send OTP" });
+  }
+});
+
+// POST /api/auth/verify-otp
+router.post("/email-verify-otp", (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ error: "Email and OTP are required" });
+
+    const valid = verifyOtp(email, otp);
+    if (!valid) return res.status(400).json({ error: "Invalid or expired OTP" });
+
+    res.json({ message: "OTP verified successfully" });
+  } catch (err) {
+    console.error("Failed to verify OTP:", err);
+    res.status(500).json({ error: "Failed to verify OTP" });
+  }
+});
 
 module.exports = router;
