@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Shield, Eye, EyeOff, Lock, RefreshCw } from 'lucide-react';
+import { Shield, Eye, EyeOff, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Captcha } from '../components/Captcha';
 import { PATTERNS } from '../utils/format';
@@ -17,18 +17,9 @@ export default function Login() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // --- YUE HENG'S 2FA FRONTEND STATES ---
+  // --- 2FA FRONTEND STATES ---
   const [requires2FA, setRequires2FA] = useState(false);
   const [otp, setOtp] = useState('');
-  const [cooldown, setCooldown] = useState(0);
-
-  // Countdown timer effect for the resend button rate limit
-  useEffect(() => {
-    if (cooldown > 0) {
-      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldown]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,14 +37,11 @@ export default function Login() {
       }
       setBusy(true);
       try {
-        const response = await api.post<{ requires2FA?: boolean; user?: any }>('/auth/login', { username, password, captcha });
+        const response = await login('user', { username, password, captcha });
 
         if (response && response.requires2FA) {
           setRequires2FA(true);
-          setCooldown(30);
-          // ✅ Don't call login() again — session already has pendingUser stored
         } else if (response && response.user) {
-          // No 2FA needed (admin, or user without phone number)
           nav('/dashboard', { replace: true });
         }
       } catch (err: any) {
@@ -78,23 +66,6 @@ export default function Login() {
       } finally {
         setBusy(false);
       }
-    }
-  };
-
-  // Triggers a fresh authentication request to generate a new token
-  const handleResendCode = async () => {
-    if (cooldown > 0) return;
-    setError('');
-    setBusy(true);
-    try {
-      // Point to the new resend-otp route
-      await api.post('/auth/resend-otp', {});
-      setOtp('');
-      setCooldown(30); // You can set this to 30s as you requested!
-    } catch (err: any) {
-      setError(err.message || 'Failed to resend verification token.');
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -167,7 +138,7 @@ export default function Login() {
                   <Lock className="w-12 h-12" />
                 </div>
                 <p className="text-sm text-gray-600 text-center mb-4">
-                  A unique 2FA verification code has been dispatched to your registered mobile number. Please input the 6-digit code below to finalize your authentication.
+                  Please open your authenticator app (e.g., Google Authenticator) and enter the 6-digit code to finalize your authentication.
                 </p>
                 <div>
                   <label className="block text-sm sm:text-base text-gray-700 mb-2 font-medium text-center">
@@ -183,19 +154,6 @@ export default function Login() {
                     className="w-full text-center tracking-widest text-2xl font-bold px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="000000"
                   />
-                </div>
-
-                {/* Secure Resend Handler */}
-                <div className="mt-4 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={handleResendCode}
-                    disabled={cooldown > 0 || busy}
-                    className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 flex items-center gap-1 transition-colors"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${busy && 'animate-spin'}`} />
-                    {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend SMS Verification'}
-                  </button>
                 </div>
               </div>
             )}

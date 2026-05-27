@@ -19,6 +19,7 @@ interface ProfileData {
 export default function Profile() {
   const [data, setData] = useState<ProfileData | null>(null);
   const [error, setError] = useState('');
+  const [qrCode, setQrCode] = useState<string | null>(null);
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -29,6 +30,16 @@ export default function Profile() {
   useEffect(() => {
     api.get<ProfileData>('/user/profile').then(setData).catch((e) => setError(e.message));
   }, []);
+
+  const handleSetup2FA = async () => {
+    try {
+      setError('');
+      const response = await api.post<{ qrCode: string }>('/user/generate-2fa');
+      setQrCode(response.qrCode);
+    } catch (e: any) {
+      setError(e.message || 'Failed to setup 2FA');
+    }
+  };
 
   const onChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +99,35 @@ export default function Profile() {
               {busy ? 'Updating…' : 'Update Password'}
             </button>
           </form>
+        </div>
+        {/* Two-Factor Authentication Card */}
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6 flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg sm:text-xl text-gray-800 mb-2">Two-Factor Authentication (2FA)</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Enhance your digital banking protection by linking an authenticator application (e.g., Google Authenticator).
+            </p>
+            
+            {qrCode && (
+              <div className="flex flex-col items-center bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4 animate-fade-in">
+                <p className="text-xs text-gray-500 font-medium mb-2 text-center uppercase tracking-wider">
+                  Scan this QR code on your mobile device
+                </p>
+                <img src={qrCode} alt="2FA QR Code" className="w-48 h-48 border bg-white p-2 rounded-md shadow-sm" />
+                <p className="text-xs text-blue-600 font-medium mt-2 text-center">
+                  Successfully synchronized watch values.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSetup2FA}
+            className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 font-medium transition-colors mt-auto"
+          >
+            {qrCode ? 'Regenerate Authentication Secret' : 'Enable Authenticator 2FA'}
+          </button>
         </div>
       </div>
     </div>

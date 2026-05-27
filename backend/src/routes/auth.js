@@ -9,7 +9,7 @@ const { requireAuth } = require('../middleware/auth');
 const { sendOtpEmail, verifyOtp } = require("../utils/otp");
 
 const crypto = require('crypto');
-const { sendOTP } = require('../utils/sms');
+const { verifyTOTP } = require('../utils/totp');
 
 const router = express.Router();
 
@@ -94,48 +94,36 @@ router.post(
 // Verify OTP
 router.post('/verify-otp', (req, res) => {
   const { otp } = req.body;
-  const now = Date.now();
 
-  // 1. Generic check: Ensure state exists
-  if (!req.session.expectedOTP || !req.session.pendingUser || !req.session.otpCreatedAt) {
-    return res.status(401).json({ error: 'Invalid verification code.' });
+  // 1. Generic check: Ensure 2FA state exists
+  if (!req.session.pendingUser || !req.session.pendingUser.otp_secret) {
+    return res.status(401).json({ error: 'Invalid verification session.' });
   }
 
-  // 2. Check Expiration
-  if (now - req.session.otpCreatedAt > 300000) {
-    delete req.session.expectedOTP;
-    // DO NOT delete pendingUser so they can still click Resend
-    delete req.session.otpCreatedAt;
-    delete req.session.otpAttempts;
-    
-    return req.session.save((err) => {
-      res.status(401).json({ error: 'Verification code expired. Please request a new one.' });
-    });
-  }
+  // 2. Verify the math using Google Authenticator logic
+  const isValid = verifyTOTP(otp, req.session.pendingUser.otp_secret);
 
-  // 3. Verify Code Match
-  if (otp !== req.session.expectedOTP) {
+  if (!isValid) {
     req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
 
     // Check if they have reached the 3-strike limit
     if (req.session.otpAttempts >= 3) {
-      delete req.session.expectedOTP;
-      // DO NOT delete pendingUser so they can still click Resend
-      delete req.session.otpCreatedAt;
+      delete req.session.pendingUser;
       delete req.session.otpAttempts;
       
-      return req.session.save((err) => {
-        res.status(401).json({ error: 'Too many failed attempts. Please request a new code.' });
+      return req.session.save(() => {
+        res.status(401).json({ error: 'Too many failed attempts. Please sign in again.' });
       });
     }
     
-    return req.session.save((err) => {
+    return req.session.save(() => {
       res.status(401).json({ error: 'Invalid verification code.' });
     });
   }
 
-  // 4. Success: Log the user in
+  // 3. Success: Log the user in
   const user = req.session.pendingUser;
+  delete user.otp_secret; // Security: Never leak the secret to the frontend
   
   req.session.regenerate(async (err) => {
     if (err) return res.status(500).json({ error: 'Session error' });
@@ -148,6 +136,7 @@ router.post('/verify-otp', (req, res) => {
 });
 
 // Resend OTP
+/*
 router.post('/resend-otp', async (req, res) => {
   // We don't need a captcha here because the user is already in the 2FA flow (pendingUser exists)
   if (!req.session.pendingUser || !req.session.pendingUser.phone_number) {
@@ -178,6 +167,7 @@ router.post('/resend-otp', async (req, res) => {
     res.status(500).json({ error: 'Failed to resend code' });
   }
 });
+*/
 
 // Admin login.
 router.post(
@@ -260,19 +250,9 @@ async function handleLogin(req, res, role) {
     }
 
     // --- 2FA IMPLEMENTATION ---
-    if (role === 'user' && account.phone_number) {
-      const otpCode = crypto.randomInt(100000, 1000000).toString();
+    if (role === 'user' && account.otp_secret) {
       
-      // SMART FIX: Auto-add +65 if the user forgot it!
-      let formattedNumber = account.phone_number;
-      if (!formattedNumber.startsWith('+')) {
-        formattedNumber = '+65' + formattedNumber;
-      }
-
-      // Send to the formatted number instead of the raw database number
-      await sendOTP(formattedNumber, otpCode);
-      
-      // We don't log them in yet! We save the OTP in their temporary session
+      // We don't log them in yet! We save the user details AND their secret in their temporary session
       req.session.pendingUser = {
         id: account[idCol],
         username: account.username,
@@ -282,9 +262,10 @@ async function handleLogin(req, res, role) {
         phone_number: account.phone_number,
         role: role,
         account_number: account.account_number || null,
+        otp_secret: account.otp_secret // Need this for the verify route
       };
-      req.session.expectedOTP = otpCode;
-      req.session.otpCreatedAt = Date.now();
+      
+      req.session.otpAttempts = 0;
 
       return req.session.save((err) => {
         if (err) {
@@ -292,7 +273,7 @@ async function handleLogin(req, res, role) {
           return res.status(500).json({ error: 'Internal server error' });
         }
         return res.status(202).json({ 
-            message: 'OTP sent', 
+            message: 'Awaiting Authenticator Code', 
             requires2FA: true 
         });
       });

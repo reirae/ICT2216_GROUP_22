@@ -15,7 +15,7 @@ export interface SessionUser {
 interface AuthState {
   user: SessionUser | null;
   loading: boolean;
-  login: (role: 'user' | 'admin', body: { username: string; password: string; captcha: string }) => Promise<SessionUser>;
+  login: (role: 'user' | 'admin', body: { username: string; password: string; captcha: string }) => Promise<any>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -42,9 +42,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (role: 'user' | 'admin', body: { username: string; password: string; captcha: string }) => {
       const path = role === 'admin' ? '/auth/admin/login' : '/auth/login';
-      const { user } = await api.post<{ user: SessionUser }>(path, body);
-      setUser(user);
-      return user;
+      const response = await api.post<any>(path, body);
+      
+      if (response && response.user) {
+        setUser(response.user);
+      }
+      return response;
     },
     []
   );

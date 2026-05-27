@@ -5,6 +5,7 @@ const { pool } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { writeLog } = require('../utils/logger');
 const { handleValidation, PATTERNS } = require('../middleware/validation');
+const { generateSecret, generateQRCode } = require('../utils/totp');
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
@@ -39,6 +40,32 @@ router.get('/profile', requireAuth('user'), async (req, res) => {
   } catch (err) {
     console.error('[profile]', err);
     res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+// Generate 2FA QR Code.
+router.post('/generate-2fa', requireAuth('user'), async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const username = req.session.user.username;
+
+    // 1. Generate a new math secret
+    const secret = generateSecret();
+
+    // 2. Save the secret to the user's database row
+    await pool.execute(
+      'UPDATE users SET otp_secret = ? WHERE user_id = ?',
+      [secret, userId]
+    );
+
+    // 3. Generate the QR code image using their username and the new secret
+    const qrCode = await generateQRCode(username, secret);
+
+    // 4. Send the QR code image back to the React frontend
+    res.json({ qrCode });
+  } catch (err) {
+    console.error('[generate-2fa]', err);
+    res.status(500).json({ error: 'Failed to generate 2FA' });
   }
 });
 
