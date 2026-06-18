@@ -13,6 +13,7 @@ interface ProfileData {
     account_number: string;
     status: string;
     created_at: string;
+    hasMfaEnabled: number;
   };
 }
 
@@ -20,6 +21,12 @@ export default function Profile() {
   const [data, setData] = useState<ProfileData | null>(null);
   const [error, setError] = useState('');
   const [qrCode, setQrCode] = useState<string | null>(null);
+  
+  const [tempSecret, setTempSecret] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [mfaSuccess, setMfaSuccess] = useState('');
+  const [mfaError, setMfaError] = useState('');
+
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -34,10 +41,40 @@ export default function Profile() {
   const handleSetup2FA = async () => {
     try {
       setError('');
-      const response = await api.post<{ qrCode: string }>('/user/generate-2fa');
+      setMfaSuccess('');
+      setMfaError(''); // Clear old errors
+      const response = await api.post<{ qrCode: string; tempSecret: string }>('/user/generate-2fa');
       setQrCode(response.qrCode);
+      setTempSecret(response.tempSecret); 
     } catch (e: any) {
-      setError(e.message || 'Failed to setup 2FA');
+      setMfaError(e.message || 'Failed to initialize 2FA generation sequence.');
+    }
+  };
+
+  const handleVerify2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      setError('');
+      setMfaSuccess('');
+      setMfaError(''); // Clear old errors
+      
+      const response = await api.post<{ message: string }>('/user/verify-and-activate-2fa', {
+        token: verificationCode,
+        tempSecret: tempSecret
+      });
+
+      setMfaSuccess(response.message);
+      setQrCode(null); 
+      setTempSecret(null);
+      setVerificationCode('');
+      
+      if (data?.user) {
+        setData({ ...data, user: { ...data.user, status: 'active_mfa', hasMfaEnabled: 1 } });
+      }
+    } catch (e: any) {
+      // Catch the API error message safely without triggering line 62's layout wipe
+      setMfaError(e.response?.data?.error || e.message || 'Invalid activation token code. Please retry.');
     }
   };
 
@@ -80,7 +117,7 @@ export default function Profile() {
             <div>
               <p className="text-gray-600 text-sm mb-1">Account Status</p>
               <span className={`inline-flex px-3 py-1 rounded-full text-sm ${
-                u.status === 'active' ? 'bg-green-100 text-green-700' :
+                (u.status === 'active' || u.status === 'active_mfa') ? 'bg-green-100 text-green-700' :
                 u.status === 'suspended' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
               }`}>{u.status}</span>
             </div>
@@ -107,6 +144,20 @@ export default function Profile() {
             <p className="text-sm text-gray-600 mb-4">
               Enhance your digital banking protection by linking an authenticator application (e.g., Google Authenticator).
             </p>
+
+            {/* Display verification confirmation statements */}
+            {mfaSuccess && (
+              <div className="bg-green-50 border border-green-300 text-green-700 px-4 py-3 rounded-lg text-sm mb-4">
+                {mfaSuccess}
+              </div>
+            )}
+
+            {/* --- Display verification confirmation statements --- */}
+            {mfaError && (
+              <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm mb-4 w-full text-center">
+                {mfaError}
+              </div>
+            )}
             
             {qrCode && (
               <div className="flex flex-col items-center bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4 animate-fade-in">
@@ -114,20 +165,50 @@ export default function Profile() {
                   Scan this QR code on your mobile device
                 </p>
                 <img src={qrCode} alt="2FA QR Code" className="w-48 h-48 border bg-white p-2 rounded-md shadow-sm" />
-                <p className="text-xs text-blue-600 font-medium mt-2 text-center">
-                  Successfully synchronized watch values.
-                </p>
+              
+                <form onSubmit={handleVerify2FA} className="mt-4 w-full max-w-[240px]">
+                  <label className="block text-xs font-semibold text-gray-600 text-left mb-1">
+                    Enter Authenticator 6-Digit Code:
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    placeholder="e.g. 123456"
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                    className="w-full text-center border p-2 rounded-lg shadow-sm tracking-widest font-mono text-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className="w-full mt-2 bg-blue-600 text-white text-xs py-2 rounded-md font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                  >
+                    Confirm & Activate 2FA
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {!qrCode && !mfaSuccess && (
+              <div className="text-sm text-gray-500 text-center py-4">
+                {u.hasMfaEnabled === 1 ? (
+                  <span className="text-green-600 font-medium">✓ Two-Factor Authentication is currently active on your account.</span>
+                ) : (
+                  "2FA setup is pending activation setup."
+                )}
               </div>
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleSetup2FA}
-            className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 font-medium transition-colors mt-auto"
-          >
-            {qrCode ? 'Regenerate Authentication Secret' : 'Enable Authenticator 2FA'}
-          </button>
+          {!qrCode && (
+            <button
+              type="button"
+              onClick={handleSetup2FA}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 font-medium transition-colors mt-auto"
+            >
+              {u.hasMfaEnabled === 1 ? 'Regenerate Authentication Secret' : 'Enable Authenticator 2FA'}
+            </button>
+          )}
         </div>
       </div>
     </div>
