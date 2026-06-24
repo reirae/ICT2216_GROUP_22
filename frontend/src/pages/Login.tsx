@@ -7,7 +7,7 @@ import { PATTERNS } from '../utils/format';
 import { api } from '../api/client';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, refresh } = useAuth();
   const nav = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -54,6 +54,7 @@ export default function Login() {
           // ✅ Don't call login() again — session already has pendingUser stored
         } else if (response && response.user) {
           // No 2FA needed (admin, or user without phone number)
+          await refresh();
           nav('/dashboard', { replace: true });
         }
       } catch (err: any) {
