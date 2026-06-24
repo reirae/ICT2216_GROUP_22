@@ -79,11 +79,15 @@ jobs:
         run: npm ci
 
       - name: Serve built frontend
+        # Use a plain static SPA server rather than `vite preview`: Vite's
+        # preview server rejects requests whose Host header isn't allow-listed
+        # (DNS-rebinding protection), which blocks the Selenium browser that
+        # reaches the app via the "testserver" hostname.
         run: |
-          npx vite preview --host 0.0.0.0 --port 4173 &
-          echo "Waiting for preview server..."
+          npx -y serve@14 -s dist -l tcp://0.0.0.0:4173 &
+          echo "Waiting for static server..."
           for i in $(seq 1 20); do
-            if curl -sf http://localhost:4173 >/dev/null; then echo "preview up"; break; fi
+            if curl -sf http://localhost:4173 >/dev/null; then echo "server up"; break; fi
             sleep 2
           done
 

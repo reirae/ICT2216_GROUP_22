@@ -8,7 +8,7 @@
 //   SELENIUM_REMOTE_URL Selenium WebDriver hub (omit to use a local chromedriver)
 //
 // Run locally:
-//   npm run build && npm run preview -- --host --port 4173 &
+//   npm run build && npx serve -s dist -l 4173 &
 //   node e2e/login.e2e.mjs
 import { Builder, By, until } from 'selenium-webdriver';
 import assert from 'node:assert';
@@ -25,6 +25,21 @@ async function buildDriver() {
   return builder.build();
 }
 
+// Dump what the browser actually sees — invaluable when the page isn't what we expect.
+async function dumpPage(driver, label) {
+  try {
+    const url = await driver.getCurrentUrl();
+    const title = await driver.getTitle();
+    const html = await driver.getPageSource();
+    console.error(`[e2e] --- ${label} ---`);
+    console.error(`[e2e] current URL: ${url}`);
+    console.error(`[e2e] title      : ${title}`);
+    console.error(`[e2e] page source (first 800 chars):\n${html.slice(0, 800)}`);
+  } catch (e) {
+    console.error(`[e2e] could not capture page state: ${e}`);
+  }
+}
+
 (async function run() {
   const driver = await buildDriver();
   try {
@@ -34,7 +49,7 @@ async function buildDriver() {
     // The username field is the most stable anchor on the login form.
     const username = await driver.wait(
       until.elementLocated(By.css('input[autocomplete="username"]')),
-      10000,
+      15000,
     );
     assert.ok(username, 'username field should render');
 
@@ -52,6 +67,7 @@ async function buildDriver() {
     console.log('[e2e] PASS — login page renders and accepts input');
   } catch (err) {
     console.error('[e2e] FAIL —', err);
+    await dumpPage(driver, 'page state at failure');
     process.exitCode = 1;
   } finally {
     await driver.quit();
