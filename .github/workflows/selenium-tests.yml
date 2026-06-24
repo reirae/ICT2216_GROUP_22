@@ -1,0 +1,98 @@
+name: Selenium UI Tests
+
+# Automated integration/UI testing (Agile testing pyramid: a small amount of
+# browser-level testing on top of the unit tests in ci.yml).
+#
+# The build job produces the static frontend; the test job serves it and drives
+# a real Chrome browser via a Selenium service container to verify the login
+# page. It is intentionally backend-free so it needs no database in CI.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: selenium-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build frontend artifact
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static frontend
+        run: npm run build
+
+      - name: Package build + e2e test
+        run: tar -czf ui-build.tar.gz dist e2e package.json package-lock.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-build
+          path: frontend/ui-build.tar.gz
+          retention-days: 7
+
+  test:
+    name: Run Selenium UI test
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: node:20
+      # Make this container reachable from the Selenium browser as "testserver".
+      options: --network-alias=testserver
+    services:
+      selenium:
+        image: selenium/standalone-chrome:latest
+        options: --shm-size=2g
+    env:
+      TEST_BASE_URL: http://testserver:4173
+      SELENIUM_REMOTE_URL: http://selenium:4444/wd/hub
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-build
+
+      - name: Extract artifact
+        run: tar -xzf ui-build.tar.gz
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Serve built frontend
+        run: |
+          npx vite preview --host 0.0.0.0 --port 4173 &
+          echo "Waiting for preview server..."
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:4173 >/dev/null; then echo "preview up"; break; fi
+            sleep 2
+          done
+
+      - name: Wait for Selenium to be ready
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf "$SELENIUM_REMOTE_URL/status" >/dev/null; then echo "selenium up"; break; fi
+            sleep 3
+          done
+
+      - name: Run Selenium UI test
+        run: node e2e/login.e2e.mjs
