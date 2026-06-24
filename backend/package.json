@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "email:dev": "email dev --dir src/emails --port 3001"
+    "email:dev": "email dev --dir src/emails --port 3001",
+    "lint": "eslint src scripts",
+    "test": "jest --runInBand --passWithNoTests",
+    "audit:deps": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",
@@ -31,10 +34,15 @@
     "twilio": "^6.0.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.13.0",
     "@types/node": "^25.9.1",
     "@types/nodemailer": "^8.0.0",
     "@types/react": "^19.2.15",
+    "eslint": "^9.13.0",
+    "globals": "^15.11.0",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.14",
+    "supertest": "^7.0.0",
     "ts-node": "^10.9.2",
     "tunnel-ssh": "^5.1.2",
     "typescript": "^6.0.3"
