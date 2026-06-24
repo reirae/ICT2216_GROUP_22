@@ -7,7 +7,7 @@ import { PATTERNS } from '../utils/format';
 import { api } from '../api/client';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, refresh } = useAuth();
   const nav = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -42,6 +42,7 @@ export default function Login() {
         if (response && response.requires2FA) {
           setRequires2FA(true);
         } else if (response && response.user) {
+          await refresh();
           nav('/dashboard', { replace: true });
         }
       } catch (err: any) {
