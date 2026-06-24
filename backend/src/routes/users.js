@@ -5,6 +5,7 @@ const { pool } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { writeLog } = require('../utils/logger');
 const { handleValidation, PATTERNS } = require('../middleware/validation');
+const { generateSecret, generateQRCode, verifyTOTP } = require('../utils/totp');
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
@@ -32,13 +33,66 @@ router.get('/dashboard', requireAuth('user'), async (req, res) => {
 router.get('/profile', requireAuth('user'), async (req, res) => {
   try {
     const [[user]] = await pool.execute(
-      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at FROM users WHERE user_id = ?',
+      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at, (otp_secret IS NOT NULL) AS hasMfaEnabled FROM users WHERE user_id = ?',
       [req.session.user.id]
     );
     res.json({ user });
   } catch (err) {
     console.error('[profile]', err);
     res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+// Generate 2FA QR Code (Step 1: Ephemeral Setup Phase)
+router.post('/generate-2fa', requireAuth('user'), async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const username = req.session.user.username;
+
+    // 1. Generate a new math secret
+    const secret = generateSecret();
+
+    // 2. Generate the QR code image natively without saving to the DB yet
+    const qrCode = await generateQRCode(username, secret);
+
+    // 3. Securely return both to the client browser's session state context
+    res.json({ qrCode, tempSecret: secret });
+  } catch (err) {
+    console.error('[generate-2fa]', err);
+    res.status(500).json({ error: 'Failed to generate 2FA' });
+  }
+});
+
+// Verify and Activate 2FA (Step 2: Enrolment Verification Gate)
+router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) => {
+  const userId = req.session.user.id;
+  const { token, tempSecret } = req.body;
+
+  if (!token || !tempSecret) {
+    return res.status(400).json({ error: 'Token and temporary secret are required.' });
+  }
+
+  try {
+    // Cryptographically check the typed token against the unverified secret key
+    const isValid = verifyTOTP(token, tempSecret);
+
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid verification token. Activation failed.' });
+    }
+
+    // Lock the secret column permanently ONLY after successful token roundtrip
+    await pool.execute(
+      'UPDATE users SET otp_secret = ? WHERE user_id = ?',
+      [tempSecret, userId]
+    );
+
+    // Track the security audit trail
+    await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
+    
+    res.json({ message: '2FA Authenticator successfully verified and activated!' });
+  } catch (err) {
+    console.error('[verify-and-activate-2fa]', err);
+    res.status(500).json({ error: 'Failed to verify and activate 2FA' });
   }
 });
 
