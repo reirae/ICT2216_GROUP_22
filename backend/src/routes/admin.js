@@ -43,10 +43,10 @@ router.post(
     const { username, password, first_name, last_name, email, phone_number } = req.body;
     try {
       const [dupes] = await pool.execute(
-        'SELECT user_id FROM users WHERE username = ? OR email = ? LIMIT 1',
-        [username, email]
+        'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
+        [username, email, phone_number || null]
       );
-      if (dupes.length) return res.status(409).json({ error: 'Username or email already exists' });
+      if (dupes.length) return res.status(409).json({ error: 'Username, email, or phone number already exists' });
 
       const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       const accountNumber = randomAcct();
@@ -149,7 +149,9 @@ router.delete('/users/:id', requireAuth('admin'), async (req, res) => {
 router.get('/transactions', requireAuth('admin'), async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT t.transaction_id, t.user_id, t.recipient_id, t.type, t.amount,
+      `SELECT t.transaction_id, t.user_id, t.recipient_id,
+              CASE WHEN t.amount < 0 THEN 'debit' ELSE 'credit' END AS type,
+              ABS(t.amount) AS amount,
               t.description, t.created_at,
               CONCAT_WS(' ', u.first_name, u.last_name) AS user_name,
               u.account_number AS user_account,

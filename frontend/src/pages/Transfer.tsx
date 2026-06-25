@@ -185,7 +185,7 @@ export default function Transfer() {
                 type="text"
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
-                maxLength={255}
+                maxLength={100}
                 className="w-full px-4 py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Enter description"
               />

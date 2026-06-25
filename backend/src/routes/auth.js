@@ -50,11 +50,11 @@ router.post(
 
     try {
       const [dupes] = await pool.execute(
-        'SELECT user_id FROM users WHERE username = ? OR email = ? LIMIT 1',
-        [username, email]
+        'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
+        [username, email, phone_number || null]
       );
       if (dupes.length) {
-        return res.status(409).json({ error: 'Username or email already in use' });
+        return res.status(409).json({ error: 'Username, email, or phone number already in use' });
       }
 
       const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
@@ -250,7 +250,7 @@ async function handleLogin(req, res, role) {
     }
 
     // --- 2FA IMPLEMENTATION ---
-    if (role === 'user' && account.otp_secret) {
+    if (role === 'user' && account.otp_enabled && account.otp_secret) {
       
       // We don't log them in yet! We save the user details AND their secret in their temporary session
       req.session.pendingUser = {
