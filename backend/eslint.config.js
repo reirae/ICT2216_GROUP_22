@@ -3,6 +3,7 @@
 // code) without failing CI on style nits, so the team can tighten rules later.
 const js = require('@eslint/js');
 const globals = require('globals');
+const security = require('eslint-plugin-security');
 
 module.exports = [
   // Things ESLint should never look at.
@@ -14,6 +15,9 @@ module.exports = [
   {
     files: ['src/**/*.js', 'scripts/**/*.js', '*.js'],
     ...js.configs.recommended,
+    plugins: {
+      security,
+    },
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',
@@ -21,6 +25,7 @@ module.exports = [
     },
     rules: {
       ...js.configs.recommended.rules,
+      ...security.configs.recommended.rules,
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-console': 'off',
       'no-empty': ['warn', { allowEmptyCatch: true }],
