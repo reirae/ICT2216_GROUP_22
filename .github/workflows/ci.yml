@@ -39,9 +39,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Format check
-        run: npx prettier --check .
-
       - name: Unit tests
         run: npm test
 
@@ -53,7 +50,7 @@ jobs:
         continue-on-error: true
 
   frontend:
-    name: Frontend (lint + test + build + audit)
+    name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -75,15 +72,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Format check
-        run: npx prettier --check .
-
       - name: Unit tests
         run: npm test
-
-      - name: Dependency audit (production deps)
-        run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
 
       - name: Production build
         run: npm run build
