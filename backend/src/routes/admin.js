@@ -19,9 +19,11 @@ router.get('/users', requireAuth('admin'), async (req, res) => {
          FROM users
          ORDER BY user_id ASC`
     );
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'success' });
     res.json({ users: rows });
   } catch (err) {
     console.error('[admin-users]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'failure' });
     res.status(500).json({ error: 'Failed to load users' });
   }
 });
@@ -46,7 +48,10 @@ router.post(
         'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
         [username, email, phone_number || null]
       );
-      if (dupes.length) return res.status(409).json({ error: 'Username, email, or phone number already exists' });
+      if (dupes.length) {
+        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure' });
+        return res.status(409).json({ error: 'Username, email, or phone number already exists' });
+      }
 
       const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       const accountNumber = randomAcct();
@@ -59,6 +64,7 @@ router.post(
       res.status(201).json({ message: 'User created' });
     } catch (err) {
       console.error('[admin-users-create]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure' });
       res.status(500).json({ error: 'Failed to create user' });
     }
   }
@@ -97,7 +103,10 @@ router.put(
         `UPDATE users SET ${fields.join(', ')} WHERE user_id = ?`,
         values
       );
-      if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
+      if (!result.affectedRows) {
+        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'failure' });
+        return res.status(404).json({ error: 'User not found' });
+      }
 
       if (req.body.status) {
         await writeLog({
@@ -117,6 +126,7 @@ router.put(
       res.json({ message: 'User updated' });
     } catch (err) {
       console.error('[admin-users-update]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'failure' });
       res.status(500).json({ error: 'Failed to update user' });
     }
   }
@@ -131,7 +141,10 @@ router.delete('/users/:id', requireAuth('admin'), async (req, res) => {
       "UPDATE users SET status = 'deactivated' WHERE user_id = ?",
       [id]
     );
-    if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
+    if (!result.affectedRows) {
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_DEACTIVATE', status: 'failure' });
+      return res.status(404).json({ error: 'User not found' });
+    }
     await writeLog({
       userId: req.session.user.id,
       userRole: 'admin',
@@ -141,6 +154,7 @@ router.delete('/users/:id', requireAuth('admin'), async (req, res) => {
     res.json({ message: 'User deactivated' });
   } catch (err) {
     console.error('[admin-users-delete]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_DEACTIVATE', status: 'failure' });
     res.status(500).json({ error: 'Failed to deactivate user' });
   }
 });
@@ -161,9 +175,11 @@ router.get('/transactions', requireAuth('admin'), async (req, res) => {
          LEFT JOIN users r ON r.user_id = t.recipient_id
         ORDER BY t.created_at DESC`
     );
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'success' });
     res.json({ transactions: rows });
   } catch (err) {
     console.error('[admin-transactions]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'failure' });
     res.status(500).json({ error: 'Failed to load transactions' });
   }
 });
@@ -177,9 +193,11 @@ router.get('/logs', requireAuth('admin'), async (req, res) => {
          ORDER BY created_at DESC
          LIMIT 1000`
     );
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'success' });
     res.json({ logs: rows });
   } catch (err) {
     console.error('[admin-logs]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'failure' });
     res.status(500).json({ error: 'Failed to load logs' });
   }
 });

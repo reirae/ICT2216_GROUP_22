@@ -92,11 +92,12 @@ router.post(
 );
 
 // Verify OTP
-router.post('/verify-otp', (req, res) => {
+router.post('/verify-otp', async (req, res) => {
   const { otp } = req.body;
 
   // 1. Generic check: Ensure 2FA state exists
   if (!req.session.pendingUser || !req.session.pendingUser.otp_secret) {
+    await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
     return res.status(401).json({ error: 'Invalid verification session.' });
   }
 
@@ -105,18 +106,19 @@ router.post('/verify-otp', (req, res) => {
 
   if (!isValid) {
     req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
-
-    // Check if they have reached the 3-strike limit
+    await writeLog({ userId: req.session.pendingUser?.id || null, userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
     if (req.session.otpAttempts >= 3) {
       delete req.session.pendingUser;
       delete req.session.otpAttempts;
       
-      return req.session.save(() => {
+      return req.session.save((err) => {
+        if (err) return res.status(500).json({ error: 'Session save error' });
         res.status(401).json({ error: 'Too many failed attempts. Please sign in again.' });
       });
     }
     
-    return req.session.save(() => {
+    return req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session save error' });
       res.status(401).json({ error: 'Invalid verification code.' });
     });
   }
@@ -186,10 +188,13 @@ router.post(
 // Logout for both roles.
 router.post('/logout', requireAuth(), (req, res) => {
   const { id, role } = req.session.user;
-  req.session.destroy((err) => {
-    if (err) return res.status(500).json({ error: 'Logout failed' });
+  req.session.destroy(async (err) => {
+    if (err) {
+      await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'failure' });
+      return res.status(500).json({ error: 'Logout failed' });
+    }
     res.clearCookie(process.env.SESSION_COOKIE_NAME || 'securebank.sid');
-    writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'success' });
+    await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'success' });
     res.json({ message: 'Logged out' });
   });
 });
@@ -319,12 +324,19 @@ router.post('/check-email', async (req, res) => {
 
 router.post('/reset-password', async (req, res) => {
   const { email, newPassword } = req.body;
-  const password_hash = await bcrypt.hash(newPassword, 12);
-  await pool.execute(
-    'UPDATE users SET password_hash = ? WHERE email = ?',
-    [password_hash, email]
-  );
-  res.json({ message: 'Password reset successfully' });
+  try {
+    const password_hash = await bcrypt.hash(newPassword, 12);
+    await pool.execute(
+      'UPDATE users SET password_hash = ? WHERE email = ?',
+      [password_hash, email]
+    );
+    await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'success' });
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('[reset-password]', err);
+    await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'failure' });
+    res.status(500).json({ error: 'Password reset failed' });
+  }
 });
 
 // POST /api/auth/send-otp

@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { body } = require('express-validator');
-const { pool } = require('../config/database');
+const { pool, runTransaction } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { writeLog } = require('../utils/logger');
 const { handleValidation, PATTERNS } = require('../middleware/validation');
@@ -264,61 +264,63 @@ router.post(
     const amount = Number.parseFloat(req.body.amount);
     const description = (req.body.description || 'Fund transfer').toString().slice(0, 100);
 
-    if (recipientId === userId) return res.status(400).json({ error: 'Cannot transfer to yourself' });
-    if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be positive' });
+    if (recipientId === userId) {
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      return res.status(400).json({ error: 'Cannot transfer to yourself' });
+    }
+    if (!(amount > 0)) {
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      return res.status(400).json({ error: 'Amount must be positive' });
+    }
 
-    const conn = await pool.getConnection();
     try {
-      await conn.beginTransaction();
-      const [[sender]] = await conn.execute(
-        'SELECT user_id, balance, status FROM users WHERE user_id = ? FOR UPDATE',
-        [userId]
-      );
-      const [[recipient]] = await conn.execute(
-        'SELECT user_id, status FROM users WHERE user_id = ? FOR UPDATE',
-        [recipientId]
-      );
-      if (!sender || sender.status !== 'active') {
-        await conn.rollback();
-        return res.status(403).json({ error: 'Your account is not active' });
-      }
-      if (!recipient || recipient.status !== 'active') {
-        await conn.rollback();
-        return res.status(404).json({ error: 'Recipient is not available' });
-      }
-      if (Number(sender.balance) < amount) {
-        await conn.rollback();
-        return res.status(400).json({ error: 'Insufficient balance' });
-      }
+      await runTransaction(async (conn) => {
+        const [[sender]] = await conn.execute(
+          'SELECT user_id, balance, status FROM users WHERE user_id = ? FOR UPDATE',
+          [userId]
+        );
+        const [[recipient]] = await conn.execute(
+          'SELECT user_id, status FROM users WHERE user_id = ? FOR UPDATE',
+          [recipientId]
+        );
+        if (!sender || sender.status !== 'active') {
+          throw { status: 403, json: { error: 'Your account is not active' } };
+        }
+        if (!recipient || recipient.status !== 'active') {
+          throw { status: 404, json: { error: 'Recipient is not available' } };
+        }
+        if (Number(sender.balance) < amount) {
+          throw { status: 400, json: { error: 'Insufficient balance' } };
+        }
 
-      await conn.execute(
-        'UPDATE users SET balance = balance - ? WHERE user_id = ?',
-        [amount, userId]
-      );
-      await conn.execute(
-        'UPDATE users SET balance = balance + ? WHERE user_id = ?',
-        [amount, recipientId]
-      );
-      await conn.execute(
-        `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
-         VALUES (?, ?, ?, ?)`,
-        [userId, recipientId, -amount, description]
-      );
-      await conn.execute(
-        `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
-         VALUES (?, ?, ?, ?)`,
-        [recipientId, userId, amount, description]
-      );
-      await conn.commit();
+        await conn.execute(
+          'UPDATE users SET balance = balance - ? WHERE user_id = ?',
+          [amount, userId]
+        );
+        await conn.execute(
+          'UPDATE users SET balance = balance + ? WHERE user_id = ?',
+          [amount, recipientId]
+        );
+        await conn.execute(
+          `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+           VALUES (?, ?, ?, ?)`,
+          [userId, recipientId, -amount, description]
+        );
+        await conn.execute(
+          `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+           VALUES (?, ?, ?, ?)`,
+          [recipientId, userId, amount, description]
+        );
+      });
+
       await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'success' });
       res.json({ message: 'Transfer completed' });
     } catch (err) {
-      await conn.rollback();
-      console.error('[transfer]', err);
       await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      // If our transaction helper threw a shaped error, respond accordingly
+      if (err && err.status && err.json) return res.status(err.status).json(err.json);
+      console.error('[transfer]', err);
       res.status(500).json({ error: 'Transfer failed' });
-    } finally {
-      conn.release();
     }
   }
 );
