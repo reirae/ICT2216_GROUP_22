@@ -84,7 +84,7 @@ router.post(
   [
     body('username').matches(PATTERNS.username).withMessage('Invalid username format'),
     body('password').isString().isLength({ min: 1, max: 128 }),
-    body('captcha').isString().isLength({ min: 1, max: 8 }),
+    body('captcha').isString().isLength({ min: 20, max: 2000 }),
   ],
   handleValidation,
   verifyCaptcha,
@@ -178,7 +178,7 @@ router.post(
   [
     body('username').matches(PATTERNS.username),
     body('password').isString().isLength({ min: 1, max: 128 }),
-    body('captcha').isString().isLength({ min: 1, max: 8 }),
+    body('captcha').isString().isLength({ min: 20, max: 2000 }),
   ],
   handleValidation,
   verifyCaptcha,
@@ -312,7 +312,7 @@ function generateAccountNumber() {
   return n;
 }
 
-router.post('/check-email', async (req, res) => {
+router.post('/check-email', verifyCaptcha, async (req, res) => {
   const { email } = req.body;
   const [rows] = await pool.execute(
     'SELECT username FROM users WHERE email = ? LIMIT 1',

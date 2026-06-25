@@ -22,22 +22,39 @@ function handleValidation(req, res, next) {
   next();
 }
 
-// Lightweight CAPTCHA verification stub.
-// Replace with hCaptcha/reCAPTCHA server-side verification in production.
-// The frontend currently sends an arithmetic-question answer that the
-// session has cached under req.session.captchaAnswer.
-function verifyCaptcha(req, res, next) {
-  const provided = (req.body.captcha || '').toString().trim();
-  const expected = req.session && req.session.captchaAnswer;
-  if (!expected) {
-    return res.status(400).json({ error: 'Captcha expired, please refresh.' });
+async function verifyCaptcha(req, res, next) {
+  const token = (req.body.captcha || '').toString().trim();
+
+  // 1. Check if token exists
+  if (!token) {
+    return res.status(400).json({ error: 'Verification token missing. Please refresh.' });
   }
-  if (provided !== String(expected)) {
-    return res.status(400).json({ error: 'Captcha is incorrect.' });
+
+  try {
+    const formData = new URLSearchParams();
+    formData.append('secret', process.env.CFTS_SECRET_KEY);
+    formData.append('response', token);
+
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (!data.success) {
+      // Log error codes for debugging
+      console.log('Turnstile verification failed:', data['error-codes']);
+      return res.status(400).json({ error: 'Verification failed. Please try again.' });
+    }
+
+    next();
+
+  } catch (error) {
+    console.error('Turnstile API error:', error);
+    return res.status(500).json({ error: 'Verification service unavailable. Please try again.' });
   }
-  // Single use - clear after verification.
-  delete req.session.captchaAnswer;
-  next();
 }
 
 module.exports = { PATTERNS, handleValidation, verifyCaptcha };

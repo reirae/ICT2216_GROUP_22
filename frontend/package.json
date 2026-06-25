@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@marsidev/react-turnstile": "^1.5.3",
     "@react-email/components": "^1.0.12",
     "lucide-react": "^0.453.0",
     "nodemailer": "^8.0.7",

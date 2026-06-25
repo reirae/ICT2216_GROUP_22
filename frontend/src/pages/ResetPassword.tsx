@@ -3,11 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Shield, Mail, RefreshCw, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { api } from '../api/client';
 import { PATTERNS } from '../utils/format';
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+import { useRef } from 'react'
 
 type Stage = 'email' | 'otp' | 'newPassword' | 'success';
 
 export default function ResetPassword() {
   const nav = useNavigate();
+
+  //Captcha
+  const turnstileRef = useRef<TurnstileInstance>(null)
+  const [captcha, setCaptcha] = useState('');
 
   // Stage control
   const [stage, setStage] = useState<Stage>('email');
@@ -37,6 +43,11 @@ export default function ResetPassword() {
     }
   }, [cooldown]);
 
+  const resetTurnstile = () => {
+    turnstileRef.current?.reset() // ← This resets the widget
+    setCaptcha('') // ← Clear the token
+  }
+
   // Stage 1: Check email exists, send OTP
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,7 +74,7 @@ export default function ResetPassword() {
       setUsername(res.username);
 
       // Send OTP to that email
-      await api.post('/auth/email-send-otp', { email, username: res.username });
+      await api.post('/auth/email-send-otp', { email, captcha, username: res.username });
 
       setStage('otp');
       setCooldown(30);
@@ -196,6 +207,8 @@ export default function ResetPassword() {
                   {error}
                 </div>
               )}
+
+              <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
 
               <button
                 type="submit"
