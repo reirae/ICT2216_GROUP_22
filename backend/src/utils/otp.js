@@ -50,6 +50,4 @@ async function sendOtpEmail(email, username) {
   console.log(`OTP sent to ${email}`);
 }
 
-// hello
-
 module.exports = { generateOtp, saveOtp, verifyOtp, sendOtpEmail };
