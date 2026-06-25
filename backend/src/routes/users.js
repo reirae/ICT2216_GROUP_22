@@ -19,7 +19,14 @@ router.get('/dashboard', requireAuth('user'), async (req, res) => {
       [userId]
     );
     const [recent] = await pool.execute(
-      'SELECT transaction_id, recipient_id, type, amount, description, created_at FROM transaction_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+      `SELECT transaction_id, recipient_id,
+              CASE WHEN amount < 0 THEN 'debit' ELSE 'credit' END AS type,
+              ABS(amount) AS amount,
+              description, created_at
+         FROM transaction_history
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 5`,
       [userId]
     );
     res.json({ user, recent });
@@ -33,7 +40,7 @@ router.get('/dashboard', requireAuth('user'), async (req, res) => {
 router.get('/profile', requireAuth('user'), async (req, res) => {
   try {
     const [[user]] = await pool.execute(
-      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at, (otp_secret IS NOT NULL) AS hasMfaEnabled FROM users WHERE user_id = ?',
+      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at, otp_enabled AS hasMfaEnabled FROM users WHERE user_id = ?',
       [req.session.user.id]
     );
     res.json({ user });
@@ -82,7 +89,7 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
 
     // Lock the secret column permanently ONLY after successful token roundtrip
     await pool.execute(
-      'UPDATE users SET otp_secret = ? WHERE user_id = ?',
+      'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
       [tempSecret, userId]
     );
 
@@ -132,7 +139,10 @@ router.put(
 router.get('/transactions', requireAuth('user'), async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT t.transaction_id, t.type, t.amount, t.description, t.created_at,
+      `SELECT t.transaction_id,
+              CASE WHEN t.amount < 0 THEN 'debit' ELSE 'credit' END AS type,
+              ABS(t.amount) AS amount,
+              t.description, t.created_at,
               t.recipient_id,
               CONCAT_WS(' ', r.first_name, r.last_name) AS recipient_name,
               r.account_number AS recipient_account
@@ -245,14 +255,14 @@ router.post(
   [
     body('recipient_id').isInt({ min: 1 }),
     body('amount').matches(PATTERNS.amount),
-    body('description').optional({ checkFalsy: true }).isString().isLength({ max: 255 }),
+    body('description').optional({ checkFalsy: true }).isString().isLength({ max: 100 }),
   ],
   handleValidation,
   async (req, res) => {
     const userId = req.session.user.id;
     const recipientId = Number(req.body.recipient_id);
     const amount = Number.parseFloat(req.body.amount);
-    const description = (req.body.description || 'Fund transfer').toString();
+    const description = (req.body.description || 'Fund transfer').toString().slice(0, 100);
 
     if (recipientId === userId) return res.status(400).json({ error: 'Cannot transfer to yourself' });
     if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be positive' });
@@ -290,13 +300,13 @@ router.post(
         [amount, recipientId]
       );
       await conn.execute(
-        `INSERT INTO transaction_history (user_id, recipient_id, type, amount, description)
-         VALUES (?, ?, 'debit', ?, ?)`,
-        [userId, recipientId, amount, description]
+        `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+         VALUES (?, ?, ?, ?)`,
+        [userId, recipientId, -amount, description]
       );
       await conn.execute(
-        `INSERT INTO transaction_history (user_id, recipient_id, type, amount, description)
-         VALUES (?, ?, 'credit', ?, ?)`,
+        `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+         VALUES (?, ?, ?, ?)`,
         [recipientId, userId, amount, description]
       );
       await conn.commit();
