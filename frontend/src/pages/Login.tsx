@@ -2,17 +2,19 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Shield, Eye, EyeOff, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { Captcha } from '../components/Captcha';
 import { PATTERNS } from '../utils/format';
 import { api } from '../api/client';
+import { useRef } from 'react'
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+
 
 export default function Login() {
   const { login, refresh } = useAuth();
   const nav = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const turnstileRef = useRef<TurnstileInstance>(null)
   const [captcha, setCaptcha] = useState('');
-  const [captchaKey, setCaptchaKey] = useState(0);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -20,6 +22,11 @@ export default function Login() {
   // --- 2FA FRONTEND STATES ---
   const [requires2FA, setRequires2FA] = useState(false);
   const [otp, setOtp] = useState('');
+
+  const resetTurnstile = () => {
+    turnstileRef.current?.reset() // ← This resets the widget
+    setCaptcha('') // ← Clear the token
+  }
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +54,7 @@ export default function Login() {
         }
       } catch (err: any) {
         setError(err.message || 'Login failed');
-        setCaptchaKey((k) => k + 1);
+        resetTurnstile();
       } finally {
         setBusy(false);
       }
@@ -130,8 +137,7 @@ export default function Login() {
                     </button>
                   </div>
                 </div>
-
-                <Captcha value={captcha} onChange={setCaptcha} refreshKey={captchaKey} />
+                <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
               </>
             ) : (
               <div className="animate-fade-in">
@@ -183,8 +189,7 @@ export default function Login() {
                   // SECURITY FIX: Wipe credentials when backing out
                   setUsername('');
                   setPassword('');
-                  setCaptcha('');
-                  setCaptchaKey((k) => k + 1); // Generates a fresh captcha
+                  resetTurnstile();
                 }}
                 className="w-full bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 text-sm font-medium transition-colors"
               >

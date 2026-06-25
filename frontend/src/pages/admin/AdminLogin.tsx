@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Shield, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Captcha } from '../../components/Captcha';
+import { useRef } from 'react'
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 import { PATTERNS } from '../../utils/format';
 
 export default function AdminLogin() {
@@ -11,10 +12,15 @@ export default function AdminLogin() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [captcha, setCaptcha] = useState('');
-  const [captchaKey, setCaptchaKey] = useState(0);
+  const turnstileRef = useRef<TurnstileInstance>(null)
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+   const resetTurnstile = () => {
+    turnstileRef.current?.reset() // ← This resets the widget
+    setCaptcha('') // ← Clear the token
+  }
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +36,7 @@ export default function AdminLogin() {
       nav('/admin/users', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Login failed');
-      setCaptchaKey((k) => k + 1);
+      resetTurnstile();
     } finally {
       setBusy(false);
     }
@@ -86,7 +92,7 @@ export default function AdminLogin() {
             </div>
 
             <div className="text-gray-900 bg-gray-50 rounded-lg p-3">
-              <Captcha value={captcha} onChange={setCaptcha} refreshKey={captchaKey} />
+              <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
             </div>
 
             {error && <div className="bg-red-900/40 border border-red-700 text-red-200 px-4 py-3 rounded-lg text-sm">{error}</div>}
