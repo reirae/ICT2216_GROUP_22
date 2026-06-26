@@ -93,20 +93,27 @@ router.post(
 
 // Verify OTP
 router.post('/verify-otp', async (req, res) => {
-  const { otp } = req.body;
+  const { otp, tempSecret } = req.body;
 
-  // 1. Generic check: Ensure 2FA state exists
-  if (!req.session.pendingUser || !req.session.pendingUser.otp_secret) {
+  // 1. Structural Check: Verify that an active login handshake session frame is alive
+  if (!req.session.pendingUser) {
     await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
-    return res.status(401).json({ error: 'Invalid verification session.' });
+    return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
 
-  // 2. Verify the math using Google Authenticator logic
-  const isValid = verifyTOTP(otp, req.session.pendingUser.otp_secret);
+  const activeSecret = req.session.pendingUser.isSetupPending ? tempSecret : req.session.pendingUser.otp_secret;
+
+  if (!otp || !activeSecret) {
+    return res.status(400).json({ error: 'Verification token parameters are missing.' });
+  }
+
+  // 2. Cryptographically evaluate the math using your speakeasy utility
+  const isValid = verifyTOTP(otp, activeSecret);
 
   if (!isValid) {
     req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
     await writeLog({ userId: req.session.pendingUser?.id || null, userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
+    
     if (req.session.otpAttempts >= 3) {
       delete req.session.pendingUser;
       delete req.session.otpAttempts;
@@ -123,53 +130,42 @@ router.post('/verify-otp', async (req, res) => {
     });
   }
 
-  // 3. Success: Log the user in
+  // 3. Handshake Success: Finalize the state configurations
   const user = req.session.pendingUser;
-  delete user.otp_secret; // Security: Never leak the secret to the frontend
-  
-  req.session.regenerate(async (err) => {
-    if (err) return res.status(500).json({ error: 'Session error' });
-    
-    req.session.user = user;
-    
-    await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success' });
-    res.json({ user: req.session.user });
-  });
-});
-
-// Resend OTP
-/*
-router.post('/resend-otp', async (req, res) => {
-  // We don't need a captcha here because the user is already in the 2FA flow (pendingUser exists)
-  if (!req.session.pendingUser || !req.session.pendingUser.phone_number) {
-    return res.status(400).json({ error: 'No 2FA session found.' });
-  }
-
-  const otpCode = crypto.randomInt(100000, 1000000).toString();
-  
-  // Reuse the same logic for formatting
-  let formattedNumber = req.session.pendingUser.phone_number;
-  if (!formattedNumber.startsWith('+')) {
-    formattedNumber = '+65' + formattedNumber;
-  }
+  const userId = user.id;
 
   try {
-    await sendOTP(formattedNumber, otpCode);
-    req.session.expectedOTP = otpCode;
-    req.session.otpCreatedAt = Date.now();
-    req.session.otpAttempts = 0; // Reset attempts on resend
+    // SECURE WRITEBACK: Commit the key to the DB row row ONLY after token roundtrip verification succeeds
+    if (user.isSetupPending) {
+      await pool.execute(
+        'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
+        [activeSecret, userId]
+      );
+      await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
+    }
+
+    delete user.otp_secret; // Data Minimization: Wipe memory references before serialization
+    delete user.isSetupPending;
     
-    // SMART FIX: Save session before responding
-    req.session.save((err) => {
-      if (err) return res.status(500).json({ error: 'Session save error' });
-      res.json({ message: 'OTP resent' });
+    req.session.regenerate(async (err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      
+      req.session.user = user;
+      
+      // Forces the server to finish saving the session memory before replying
+      req.session.save(async (saveErr) => {
+        if (saveErr) return res.status(500).json({ error: 'Session save failure' });
+        
+        await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success' });
+        res.json({ user: req.session.user });
+      });
     });
   } catch (err) {
-    console.error('[resend-otp]', err);
-    res.status(500).json({ error: 'Failed to resend code' });
+    console.error('[verify-otp-onboarding]', err);
+    res.status(500).json({ error: 'Failed to complete authentication sequence.' });
   }
 });
-*/
+// ====================================================================
 
 // Admin login.
 router.post(
@@ -255,40 +251,48 @@ async function handleLogin(req, res, role) {
     }
 
     // --- 2FA IMPLEMENTATION ---
-    if (role === 'user' && account.otp_enabled && account.otp_secret) {
-      
-      // We don't log them in yet! We save the user details AND their secret in their temporary session
-      req.session.pendingUser = {
-        id: account[idCol],
-        username: account.username,
-        first_name: account.first_name,
-        last_name: account.last_name,
-        email: account.email,
-        phone_number: account.phone_number,
-        role: role,
-        account_number: account.account_number || null,
-        otp_secret: account.otp_secret // Need this for the verify route
-      };
-      
-      req.session.otpAttempts = 0;
+    if (role === 'user') {
+      // 1. An account is only considered safely disabled if BOTH conditions are met perfectly.
+      const hasUserDisabledMFA = account.otp_enabled === 0 && account.otp_secret === null;
 
-      return req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-        return res.status(202).json({ 
-            message: 'Awaiting Authenticator Code', 
-            requires2FA: true 
+      if (!hasUserDisabledMFA) {
+        // 2. If it's not disabled, determine if they need first-time onboarding setup
+        const isSetupPending = account.otp_secret === null;
+
+        req.session.pendingUser = {
+          id: String(account[idCol]),
+          username: account.username,
+          first_name: account.first_name,
+          last_name: account.last_name,
+          email: account.email,
+          role: role,
+          account_number: account.account_number || null,
+          otp_secret: account.otp_secret || null, // Holds string or null
+          isSetupPending: isSetupPending          // True = Onboarding Page, False = Challenge Page
+        };
+        
+        req.session.otpAttempts = 0;
+
+        return req.session.save((err) => {
+          if (err) {
+            console.error('Session save error:', err);
+            return res.status(500).json({ error: 'Internal server error' });
+          }
+          
+          return res.status(202).json({ 
+            message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code', 
+            requires2FA: true,
+            isSetupPending: isSetupPending
+          });
         });
-      });
+      }
     }
     // ------------------------------------------
 
     req.session.regenerate((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
       req.session.user = {
-        id: account[idCol],
+        id: String(account[idCol]),
         username: account.username,
         first_name: account.first_name,
         last_name: account.last_name,
@@ -296,8 +300,13 @@ async function handleLogin(req, res, role) {
         role,
         account_number: account.account_number || null,
       };
-      writeLog({ userId: account[idCol], userRole: role, action: 'LOGIN', status: 'success' });
-      res.json({ user: req.session.user });
+
+      req.session.save(async (saveErr) => {
+        if (saveErr) return res.status(500).json({ error: 'Session save failure' });
+        
+        writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success' });
+        res.json({ user: req.session.user });
+      });
     });
   } catch (err) {
     console.error('[login]', err);
@@ -368,5 +377,29 @@ router.post("/email-verify-otp", (req, res) => {
     res.status(500).json({ error: "Failed to verify OTP" });
   }
 });
+
+// ====================================================================
+// START: PUBLIC HANDSHAKE 2FA ONBOARDING RESOURCE GENERATOR
+// ====================================================================
+router.post('/generate-onboarding-2fa', async (req, res) => {
+  try {
+    // Structural Guard: Validate that a standard password authentication session framework exists
+    if (!req.session.pendingUser || !req.session.pendingUser.isSetupPending) {
+      return res.status(403).json({ error: 'Access denied. Session parameters are out of bounds.' });
+    }
+
+    const { username } = req.session.pendingUser;
+
+    // Use standard Speakeasy library modules natively to generate seed assets safely
+    const secret = require('../utils/totp').generateSecret();
+    const qrCode = await require('../utils/totp').generateQRCode(username, secret);
+
+    res.json({ qrCode, tempSecret: secret });
+  } catch (err) {
+    console.error('[generate-onboarding-2fa]', err);
+    res.status(500).json({ error: 'Failed to safely generate onboarding security streams.' });
+  }
+});
+// ====================================================================
 
 module.exports = router;

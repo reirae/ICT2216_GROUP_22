@@ -325,4 +325,24 @@ router.post(
   }
 );
 
+// ==========================================
+// START: DISABLE MULTI-FACTOR OPT-OUT ROUTE
+// ==========================================
+router.post('/disable-2fa', requireAuth('user'), async (req, res) => {
+  const userId = req.session.user.id;
+  try {
+    await pool.execute(
+      'UPDATE users SET otp_secret = NULL, otp_enabled = 0 WHERE user_id = ?',
+      [userId]
+    );
+
+    await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'success' });
+    res.json({ message: 'Two-Factor Authentication has been successfully disabled.' });
+  } catch (err) {
+    console.error('[disable-2fa]', err);
+    res.status(500).json({ error: 'Failed to modify security configurations.' });
+  }
+});
+// ==========================================
+
 module.exports = router;
