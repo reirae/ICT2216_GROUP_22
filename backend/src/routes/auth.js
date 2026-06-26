@@ -310,7 +310,7 @@ async function handleLogin(req, res, role) {
     }
 
     // --- 2FA IMPLEMENTATION CONTROL ENGINE (UNIFIED FOR USER & ADMIN) ---
-    const hasDisabledMFA = account.otp_enabled === 0 && account.otp_secret === null;
+    const hasDisabledMFA = role === 'user' && account.otp_enabled === 0 && account.otp_secret === null;
 
     if (!hasDisabledMFA) {
       const isSetupPending = account.otp_secret === null;

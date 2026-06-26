@@ -188,6 +188,9 @@ export default function AdminLogin() {
                 {isOnboarding && showQR && qrCode && (
                   <div className="flex flex-col items-center bg-gray-900 p-3 rounded-lg border border-gray-700">
                     <img src={qrCode} alt="Onboarding QR Code" className="w-44 h-44 bg-white p-2 border rounded shadow-sm" />
+                    <p className="text-[11px] text-gray-300 font-mono mt-3 bg-gray-950 p-2 rounded border border-gray-800 select-all w-full text-center">
+                      Secret: {tempSecret}
+                    </p>
                   </div>
                 )}
 
