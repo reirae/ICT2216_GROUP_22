@@ -186,11 +186,12 @@ export default function Transfer() {
               <input
                 type="text"
                 value={desc}
-                onChange={(e) => setDesc(e.target.value)}
+                onChange={(e) => setDesc(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))}
                 maxLength={100}
                 className="w-full px-4 py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter description"
+                placeholder="Enter description (letters and numbers only)"
               />
+              <p className="text-xs text-gray-400 mt-1">{desc.length}/100 characters</p>
             </div>
 
             {error && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
