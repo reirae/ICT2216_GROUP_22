@@ -124,7 +124,7 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
 
     // Track the security audit trail
     await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
-    
+
     res.json({ message: '2FA Authenticator successfully verified and activated!' });
   } catch (err) {
     console.error('[verify-and-activate-2fa]', err);
@@ -287,14 +287,22 @@ router.post(
   [
     body('recipient_id').isInt({ min: 1 }),
     body('amount').matches(PATTERNS.amount),
-    body('description').optional({ checkFalsy: true }).isString().isLength({ max: 100 }),
+    body('description')
+      .optional({ checkFalsy: true })
+      .isString()
+      .isLength({ max: 100 })
+      .matches(/^[a-zA-Z0-9 ]+$/)
+      .withMessage('Description must contain only letters, numbers, and spaces'),
   ],
   handleValidation,
   async (req, res) => {
     const userId = req.session.user.id;
     const recipientId = Number(req.body.recipient_id);
     const amount = Number.parseFloat(req.body.amount);
-    const description = (req.body.description || 'Fund transfer').toString().slice(0, 100);
+    const description = (req.body.description || 'Fund transfer')
+      .toString()
+      .replace(/[^a-zA-Z0-9 ]/g, '')
+      .slice(0, 100);
 
     if (recipientId === userId) {
       await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });

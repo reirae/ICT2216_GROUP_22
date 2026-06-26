@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, DollarSign, QrCode } from 'lucide-react';
+import { Check, DollarSign } from 'lucide-react';
 import { api } from '../api/client';
 import { formatMoney } from '../utils/format';
 import PageLoader from '../components/PageLoader';
@@ -112,9 +112,8 @@ export default function Transfer() {
                 <button
                   key={m}
                   onClick={() => { setMode(m); setSelected(null); setError(''); }}
-                  className={`px-4 py-2 text-sm sm:text-base -mb-px border-b-2 ${
-                    mode === m ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600'
-                  }`}
+                  className={`px-4 py-2 text-sm sm:text-base -mb-px border-b-2 ${mode === m ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600'
+                    }`}
                 >
                   {m === 'saved' ? 'Saved recipient' : 'Account / Phone'}
                 </button>
@@ -130,9 +129,8 @@ export default function Transfer() {
                     <button
                       key={r.user_recipient_id}
                       onClick={() => setSelected({ user_id: r.recipient_id, name: `${r.first_name} ${r.last_name}`, account_number: r.account_number })}
-                      className={`w-full p-3 sm:p-4 border rounded-lg text-left transition-all ${
-                        isSel ? 'border-blue-600 bg-blue-50' : 'border-gray-300 hover:border-blue-400'
-                      }`}
+                      className={`w-full p-3 sm:p-4 border rounded-lg text-left transition-all ${isSel ? 'border-blue-600 bg-blue-50' : 'border-gray-300 hover:border-blue-400'
+                        }`}
                     >
                       <p className="text-sm sm:text-base text-gray-800">{r.first_name} {r.last_name}</p>
                       <p className="text-xs sm:text-sm text-gray-600">{r.account_number}</p>
@@ -157,9 +155,6 @@ export default function Transfer() {
                     Look up
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 flex items-center gap-1">
-                  <QrCode className="w-3 h-3" /> QR code transfer with 6-7 minute timeout — coming soon.
-                </p>
               </div>
             )}
 
@@ -191,11 +186,12 @@ export default function Transfer() {
               <input
                 type="text"
                 value={desc}
-                onChange={(e) => setDesc(e.target.value)}
+                onChange={(e) => setDesc(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))}
                 maxLength={100}
                 className="w-full px-4 py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter description"
+                placeholder="Enter description (letters and numbers only)"
               />
+              <p className="text-xs text-gray-400 mt-1">{desc.length}/100 characters</p>
             </div>
 
             {error && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
@@ -214,13 +210,24 @@ export default function Transfer() {
               <p className="text-gray-600">Please review the transfer details</p>
             </div>
             <div className="bg-gray-50 rounded-lg p-6 space-y-4">
-              <div className="flex justify-between"><span className="text-gray-600">Recipient</span><span className="text-gray-800">{selected?.name}</span></div>
-              <div className="flex justify-between"><span className="text-gray-600">Account Number</span><span className="text-gray-800">{selected?.account_number}</span></div>
-              <div className="border-t border-gray-300 pt-4 flex justify-between">
-                <span className="text-gray-600">Amount</span>
-                <span className="text-xl text-gray-800">{formatMoney(amount)}</span>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-600 shrink-0">Recipient</span>
+                <span className="text-gray-800 text-right break-words min-w-0">{selected?.name}</span>
               </div>
-              {desc && <div className="flex justify-between"><span className="text-gray-600">Description</span><span className="text-gray-800">{desc}</span></div>}
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-600 shrink-0">Account Number</span>
+                <span className="text-gray-800 text-right break-words min-w-0">{selected?.account_number}</span>
+              </div>
+              <div className="border-t border-gray-300 pt-4 flex justify-between gap-4">
+                <span className="text-gray-600 shrink-0">Amount</span>
+                <span className="text-xl text-gray-800 text-right break-words min-w-0">{formatMoney(amount)}</span>
+              </div>
+              {desc && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600 shrink-0">Description</span>
+                  <span className="text-gray-800 text-right break-words min-w-0">{desc}</span>
+                </div>
+              )}
             </div>
             {error && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
             <div className="flex gap-3">
