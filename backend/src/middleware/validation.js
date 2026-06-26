@@ -6,6 +6,10 @@ const PATTERNS = {
   email: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,
   password: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,128}$/,
   phone: /^\+?[0-9]{8,15}$/,
+  // Singapore local mobile/landline: exactly 8 digits, no country code/+65.
+  phoneSG: /^[0-9]{8}$/,
+  // 6-digit numeric login PIN.
+  pin: /^[0-9]{6}$/,
   name: /^[a-zA-Z][a-zA-Z\s'-]{0,49}$/,
   accountNumber: /^[0-9]{10,20}$/,
   amount: /^\d{1,13}(\.\d{1,2})?$/,

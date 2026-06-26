@@ -82,11 +82,11 @@ router.post(
   '/register',
   [
     body('username').matches(PATTERNS.username).withMessage('Invalid username'),
-    body('password').matches(PATTERNS.password).withMessage('Password too weak'),
-    body('first_name').matches(PATTERNS.name),
-    body('last_name').matches(PATTERNS.name),
+    body('password').matches(PATTERNS.pin).withMessage('PIN must be exactly 6 digits'),
+    body('first_name').matches(PATTERNS.name).withMessage('First name cannot contain numbers or symbols'),
+    body('last_name').matches(PATTERNS.name).withMessage('Last name cannot contain numbers or symbols'),
     body('email').matches(PATTERNS.email),
-    body('phone_number').optional({ checkFalsy: true }).matches(PATTERNS.phone),
+    body('phone_number').matches(PATTERNS.phoneSG).withMessage('Phone number must be exactly 8 digits (no +65)'),
   ],
   handleValidation,
   async (req, res) => {
@@ -95,20 +95,23 @@ router.post(
     try {
       const [dupes] = await pool.execute(
         'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
-        [username, email, phone_number || null]
+        [username, email, phone_number]
       );
       if (dupes.length) {
         return res.status(409).json({ error: 'Username, email, or phone number already in use' });
       }
 
+      // The PIN is hashed exactly like a password and stored in password_hash.
       const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       const accountNumber = generateAccountNumber();
 
+      // New accounts start with 2FA armed but not yet set up: otp_enabled = TRUE
+      // and otp_secret = NULL, so the first login forces TOTP onboarding.
       await pool.execute(
         `INSERT INTO users
-          (username, password_hash, first_name, last_name, email, phone_number, account_number, balance, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-        [username, password_hash, first_name, last_name, email, phone_number || null, accountNumber, 0]
+          (username, password_hash, first_name, last_name, email, phone_number, account_number, balance, status, otp_secret, otp_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1)`,
+        [username, password_hash, first_name, last_name, email, phone_number, accountNumber, 0]
       );
 
       await writeLog({ userRole: 'user', action: 'REGISTER', status: 'success' });
