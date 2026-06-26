@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowUpRight, ArrowDownLeft, TrendingUp, Users, CreditCard } from 'lucide-react';
 import { api } from '../api/client';
 import { formatDate, formatMoney } from '../utils/format';
-import LoadingSpinner from '../components/LoadingSpinner';
+import PageLoader from '../components/PageLoader';
 
 interface DashboardData {
   user: { first_name: string; last_name: string; account_number: string; balance: string; status: string };
@@ -25,7 +25,7 @@ export default function Dashboard() {
   }, []);
 
   if (error) return <p className="text-red-600">{error}</p>;
-  if (!data) return <div className="flex items-center justify-center h-screen"><LoadingSpinner /></div>;
+  if (!data) return <PageLoader />;
 
   return (
     <div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, XCircle, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { api } from '../api/client';
 import { formatDate, formatMoney } from '../utils/format';
+import PageLoader from '../components/PageLoader';
 
 interface Txn {
   transaction_id: number;
@@ -18,11 +19,13 @@ export default function Transactions() {
   const [search, setSearch] = useState('');
   const [type, setType] = useState<'all' | 'debit' | 'credit'>('all');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get<{ transactions: Txn[] }>('/user/transactions')
       .then((d) => setTxns(d.transactions))
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
   const filtered = useMemo(() => {
@@ -39,6 +42,8 @@ export default function Transactions() {
       );
     });
   }, [txns, search, type]);
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>

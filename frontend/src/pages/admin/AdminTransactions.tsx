@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, Filter, XCircle } from 'lucide-react';
 import { api } from '../../api/client';
 import { formatDate, formatMoney } from '../../utils/format';
+import PageLoader from '../../components/PageLoader';
 
 interface AdminTxn {
   transaction_id: number;
@@ -26,11 +27,13 @@ export default function AdminTransactions() {
   const [min, setMin] = useState('');
   const [max, setMax] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get<{ transactions: AdminTxn[] }>('/admin/transactions')
       .then((d) => setTxns(d.transactions))
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
   const filtered = useMemo(() => {
@@ -54,6 +57,8 @@ export default function AdminTransactions() {
   }, [txns, search, type, userId, dateFrom, dateTo, min, max]);
 
   const clear = () => { setSearch(''); setType('all'); setUserId(''); setDateFrom(''); setDateTo(''); setMin(''); setMax(''); };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>

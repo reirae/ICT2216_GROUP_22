@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth } from '../context/AuthContext';
+import PageLoader from './PageLoader';
 
 interface Props { children: ReactNode; role?: 'user' | 'admin' }
 
@@ -9,11 +10,7 @@ export function ProtectedRoute({ children, role }: Props) {
   const loc = useLocation();
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-gray-500">
-        Loading…
-      </div>
-    );
+    return <PageLoader fullScreen label="Checking your session…" />;
   }
   if (!user) {
     const target = role === 'admin' ? '/admin/login' : '/login';

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, User, Users } from 'lucide-react';
 import { api } from '../api/client';
+import PageLoader from '../components/PageLoader';
 
 interface Recipient {
   user_recipient_id: number;
@@ -17,13 +18,16 @@ export default function Recipients() {
   const [identifier, setIdentifier] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = () =>
     api.get<{ recipients: Recipient[] }>('/user/recipients')
       .then((d) => setItems(d.recipients))
       .catch((e) => setError(e.message));
 
-  useEffect(() => { load(); }, []);
+  // Only the initial fetch shows the full-page spinner; later refreshes
+  // (after add/remove) keep the list visible.
+  useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
   const add = async () => {
     setError(''); setInfo('');
@@ -45,6 +49,8 @@ export default function Recipients() {
     try { await api.del(`/user/recipients/${id}`); await load(); }
     catch (e: any) { setError(e.message); }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>
