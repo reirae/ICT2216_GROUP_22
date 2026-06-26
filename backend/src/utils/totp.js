@@ -35,7 +35,7 @@ function verifyTOTP(token, secret) {
       secret: secret,
       encoding: 'base32',
       token: token,
-      window: 1 // Adds a 30-second grace period for clock drift
+      window: 0 // Hard enforcement. 0 means ONLY accept the exact current 30s code.
     });
   } catch (err) {
     console.error('Error verifying TOTP:', err);

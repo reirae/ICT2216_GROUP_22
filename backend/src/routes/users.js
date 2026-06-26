@@ -9,6 +9,23 @@ const { generateSecret, generateQRCode, verifyTOTP } = require('../utils/totp');
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
+const crypto = require('crypto');
+const ENCRYPTION_KEY = Buffer.from(process.env.DB_ENCRYPTION_KEY || '0'.repeat(64), 'hex');
+const IV_LENGTH = 16;
+
+function encryptSecret(text) {
+  if (!text) return null;
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return `${iv.toString('hex')}:${encrypted}:${authTag}`;
+}
+
+// Anti-Replay Cache Registry for Settings Onboarding Flow
+const profileReplayCache = new Set();
+setInterval(() => profileReplayCache.clear(), 30000);
 
 // Dashboard summary: balance + recent transactions.
 router.get('/dashboard', requireAuth('user'), async (req, res) => {
@@ -80,6 +97,12 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
   }
 
   try {
+    // DEFENSE FIX: PROFILE SETTINGS ANTI-REPLAY GATE Check
+    const replayCacheKey = `${userId}:${token}`;
+    if (profileReplayCache.has(replayCacheKey)) {
+      return res.status(400).json({ error: 'This token has already been used to bind a device configuration. Please wait for a new code.' });
+    }
+
     // Cryptographically check the typed token against the unverified secret key
     const isValid = verifyTOTP(token, tempSecret);
 
@@ -87,10 +110,16 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
       return res.status(400).json({ error: 'Invalid verification token. Activation failed.' });
     }
 
+    // Mark token as spent for the remainder of its active 30-second window
+    profileReplayCache.add(replayCacheKey);
+
+    // Encrypt the plain text string payload array before writing to database structures
+    const encryptedSecret = encryptSecret(tempSecret);
+
     // Lock the secret column permanently ONLY after successful token roundtrip
     await pool.execute(
       'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
-      [tempSecret, userId]
+      [encryptedSecret, userId]
     );
 
     // Track the security audit trail
