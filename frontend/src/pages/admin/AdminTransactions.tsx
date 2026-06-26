@@ -20,7 +20,6 @@ interface AdminTxn {
 export default function AdminTransactions() {
   const [txns, setTxns] = useState<AdminTxn[]>([]);
   const [search, setSearch] = useState('');
-  const [type, setType] = useState<'all' | 'debit' | 'credit'>('all');
   const [userId, setUserId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -38,8 +37,13 @@ export default function AdminTransactions() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return txns.filter((t) => {
-      if (type !== 'all' && t.type !== type) return false;
+    
+    // Sort transactions strictly by date and time descending
+    const sortedTxns = [...txns].sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    return sortedTxns.filter((t) => {
       if (userId && String(t.user_id) !== userId.trim()) return false;
       if (dateFrom && t.created_at.slice(0, 10) < dateFrom) return false;
       if (dateTo && t.created_at.slice(0, 10) > dateTo) return false;
@@ -54,15 +58,15 @@ export default function AdminTransactions() {
         String(t.transaction_id).includes(q)
       );
     });
-  }, [txns, search, type, userId, dateFrom, dateTo, min, max]);
+  }, [txns, search, userId, dateFrom, dateTo, min, max]);
 
-  const clear = () => { setSearch(''); setType('all'); setUserId(''); setDateFrom(''); setDateTo(''); setMin(''); setMax(''); };
+  const clear = () => { setSearch(''); setUserId(''); setDateFrom(''); setDateTo(''); setMin(''); setMax(''); };
 
   if (loading) return <PageLoader />;
 
   return (
     <div>
-      <h1 className="text-2xl sm:text-3xl text-gray-800 mb-4 sm:mb-6">All User Transactions</h1>
+      <h1 className="text-2xl sm:text-3xl text-gray-800 mb-4 sm:mb-6">All Transactions</h1>
 
       <div className="bg-white rounded-lg shadow p-4 mb-4">
         <div className="flex items-center gap-2 mb-3">
@@ -70,7 +74,7 @@ export default function AdminTransactions() {
           <h3 className="text-lg text-gray-800">Filter Transactions</h3>
         </div>
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="relative">
               <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -81,11 +85,6 @@ export default function AdminTransactions() {
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <select value={type} onChange={(e) => setType(e.target.value as any)} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="all">All Types</option>
-              <option value="debit">Debit</option>
-              <option value="credit">Credit</option>
-            </select>
             <input type="text" inputMode="numeric" value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="User ID" className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -115,7 +114,6 @@ export default function AdminTransactions() {
                 <th className="px-6 py-3 text-left text-gray-700">Transaction ID</th>
                 <th className="px-6 py-3 text-left text-gray-700">User</th>
                 <th className="px-6 py-3 text-left text-gray-700">Date & Time</th>
-                <th className="px-6 py-3 text-left text-gray-700">Type</th>
                 <th className="px-6 py-3 text-left text-gray-700">Counterparty</th>
                 <th className="px-6 py-3 text-right text-gray-700">Amount</th>
               </tr>
@@ -126,9 +124,6 @@ export default function AdminTransactions() {
                   <td className="px-6 py-4 text-gray-800">{t.transaction_id}</td>
                   <td className="px-6 py-4 text-gray-600">{t.user_name} <span className="text-xs text-gray-400">({t.user_id})</span></td>
                   <td className="px-6 py-4 text-sm text-gray-600">{formatDate(t.created_at)}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex px-2 py-1 rounded text-xs ${t.type === 'debit' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{t.type}</span>
-                  </td>
                   <td className="px-6 py-4 text-gray-800">{t.recipient_name || '—'}</td>
                   <td className={`px-6 py-4 text-right ${t.type === 'debit' ? 'text-red-600' : 'text-green-600'}`}>
                     {t.type === 'debit' ? '-' : '+'}{formatMoney(t.amount)}
