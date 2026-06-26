@@ -1,44 +1,105 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Shield, Eye, EyeOff } from 'lucide-react';
+import { Shield, Eye, EyeOff, Lock, QrCode } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useRef } from 'react'
-import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile';
 import { PATTERNS } from '../../utils/format';
+import { api } from '../../api/client';
 
 export default function AdminLogin() {
-  const { login } = useAuth();
+  const { login, refresh } = useAuth();
   const nav = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [captcha, setCaptcha] = useState('');
-  const turnstileRef = useRef<TurnstileInstance>(null)
+  const turnstileRef = useRef<TurnstileInstance>(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-   const resetTurnstile = () => {
-    turnstileRef.current?.reset() // ← This resets the widget
-    setCaptcha('') // ← Clear the token
-  }
+  // --- ADMIN 2FA HANDSHAKE STATES ---
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [isOnboarding, setIsOnboarding] = useState(false); 
+  const [showQR, setShowQR] = useState(false);             
+  const [tempSecret, setTempSecret] = useState('');         
+  const [qrCode, setQrCode] = useState('');                 
+  const [otp, setOtp] = useState('');
+
+  const resetTurnstile = () => {
+    turnstileRef.current?.reset();
+    setCaptcha('');
+  };
+
+  const handleShowQRCode = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      const setupRes = await api.post<{ qrCode: string; tempSecret: string }>('/auth/generate-onboarding-2fa');
+      setQrCode(setupRes.qrCode);
+      setTempSecret(setupRes.tempSecret);
+      setShowQR(true);
+    } catch (setupErr: any) {
+      setError(setupErr.response?.data?.error || 'Failed to initialize admin onboarding streams.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!PATTERNS.username.test(username)) {
-      setError('Invalid admin username format.');
-      return;
+
+    // STAGE 1: Standard Password Entry Verification Check
+    if (!requires2FA && !isOnboarding) {
+      if (!PATTERNS.username.test(username)) {
+        setError('Invalid admin username format.');
+        return;
+      }
+      if (!password) return setError('Password is required.');
+      setBusy(true);
+      try {
+        const response = await login('admin', { username, password, captcha });
+
+        if (response && response.requires2FA) {
+          if (response.isSetupPending) {
+            setIsOnboarding(true); 
+          } else {
+            setRequires2FA(true);  
+          }
+        } else if (response && response.user) {
+          await refresh();
+          nav('/admin/users', { replace: true });
+        }
+      } catch (err: any) {
+        setError(err.message || 'Login failed');
+        resetTurnstile();
+      } finally {
+        setBusy(false);
+      }
     }
-    if (!password) return setError('Password is required.');
-    setBusy(true);
-    try {
-      await login('admin', { username, password, captcha });
-      nav('/admin/users', { replace: true });
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
-      resetTurnstile();
-    } finally {
-      setBusy(false);
+    // STAGE 2: 2FA Token Validation Request Input
+    else {
+      if (isOnboarding && !showQR) {
+        setError('Please generate and scan your QR code before verifying.');
+        return;
+      }
+      if (!otp || otp.length !== 6) {
+        setError('Please enter a valid 6-digit verification code.');
+        return;
+      }
+      setBusy(true);
+      try {
+        await api.post('/auth/verify-otp', { 
+          otp, 
+          tempSecret: isOnboarding ? tempSecret : undefined 
+        });
+        
+        window.location.href = '/admin/users';
+      } catch (err: any) {
+        setError(err.response?.data?.error || err.message || 'Invalid verification code.');
+      } finally {
+        setBusy(false);
+      }
     }
   };
 
@@ -58,52 +119,127 @@ export default function AdminLogin() {
 
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="bg-gray-800 rounded-lg shadow-lg w-full max-w-md p-6 sm:p-8">
-          <h2 className="text-xl sm:text-2xl text-white text-center mb-6">Administrator Sign In</h2>
+          <h2 className="text-xl sm:text-2xl text-white text-center mb-6">
+            {(requires2FA || isOnboarding) ? 'Security Verification' : 'Administrator Sign In'}
+          </h2>
           <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm sm:text-base mb-2">Username</label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                maxLength={50}
-              />
-            </div>
-            <div>
-              <label className="block text-sm sm:text-base mb-2">Password</label>
-              <div className="relative">
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  maxLength={128}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300"
-                  aria-label="Toggle password visibility"
-                >
-                  {showPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              </div>
-            </div>
+            {!requires2FA && !isOnboarding ? (
+              <>
+                <div>
+                  <label className="block text-sm sm:text-base mb-2">Username</label>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                    maxLength={50}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm sm:text-base mb-2">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPw ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                      maxLength={128}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPw(!showPw)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300"
+                    >
+                      {showPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
 
-            <div className="text-gray-900 bg-gray-50 rounded-lg p-3">
-              <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
-            </div>
+                <div className="text-gray-900 bg-gray-50 rounded-lg p-3">
+                  <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4 text-center">
+                <div className="flex justify-center text-blue-400">
+                  <Lock className="w-12 h-12" />
+                </div>
+                <h3 className="text-md font-medium text-white">
+                  {isOnboarding ? 'Mandatory Admin Authenticator Link' : 'Admin Security Challenge'}
+                </h3>
+                <p className="text-xs text-gray-400">
+                  {isOnboarding 
+                    ? 'To safeguard administrative privileges, you must tie an authenticator device key config configuration below.' 
+                    : 'Please enter the rolling 6-digit operational matrix key from your device.'}
+                </p>
+
+                {isOnboarding && !showQR && (
+                  <button
+                    type="button"
+                    onClick={handleShowQRCode}
+                    disabled={busy}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-3 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors text-sm shadow-sm"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    Reveal Admin Setup QR Code
+                  </button>
+                )}
+
+                {isOnboarding && showQR && qrCode && (
+                  <div className="flex flex-col items-center bg-gray-900 p-3 rounded-lg border border-gray-700">
+                    <img src={qrCode} alt="Onboarding QR Code" className="w-44 h-44 bg-white p-2 border rounded shadow-sm" />
+                  </div>
+                )}
+
+                {(!isOnboarding || showQR) && (
+                  <div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                      className="w-full text-center tracking-widest text-2xl font-bold px-4 py-3 bg-gray-900 border border-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="000000"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             {error && <div className="bg-red-900/40 border border-red-700 text-red-200 px-4 py-3 rounded-lg text-sm">{error}</div>}
 
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60"
-            >
-              {busy ? 'Signing in…' : 'Sign In'}
-            </button>
+            {(!isOnboarding || showQR) && (
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium"
+              >
+                {busy ? 'Signing in…' : (requires2FA || isOnboarding) ? 'Verify Admin Token' : 'Sign In'}
+              </button>
+            )}
+
+            {(requires2FA || isOnboarding) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRequires2FA(false);
+                  setIsOnboarding(false);
+                  setShowQR(false);
+                  setQrCode('');
+                  setTempSecret('');
+                  setOtp('');
+                  setError('');
+                  setUsername('');
+                  setPassword('');
+                  resetTurnstile();
+                }}
+                className="w-full bg-gray-700 text-gray-200 py-2 rounded-lg hover:bg-gray-600 text-sm font-medium transition-colors"
+              >
+                Back to Admin Login
+              </button>
+            )}
           </form>
         </div>
       </div>

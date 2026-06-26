@@ -191,11 +191,16 @@ router.post('/verify-otp', async (req, res) => {
     // SECURE WRITEBACK: Commit the key encrypted to the DB row ONLY after token roundtrip verification succeeds
     if (user.isSetupPending) {
       const encryptedSecret = encryptSecret(activeSecret);
+      
+      // Select the correct storage row coordinates dynamically
+      const targetTable = user.role === 'admin' ? 'admins' : 'users';
+      const targetIdColumn = user.role === 'admin' ? 'admin_id' : 'user_id';
+
       await pool.execute(
-        'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
+        `UPDATE ${targetTable} SET otp_secret = ?, otp_enabled = 1 WHERE ${targetIdColumn} = ?`,
         [encryptedSecret, userId]
       );
-      await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
+      await writeLog({ userId, userRole: user.role, action: '2FA_SETUP', status: 'success' });
     }
 
     delete user.otp_secret; // Data Minimization: Wipe memory references before serialization
@@ -304,43 +309,41 @@ async function handleLogin(req, res, role) {
       );
     }
 
-    // --- 2FA IMPLEMENTATION CONTROL ENGINE ---
-    if (role === 'user') {
-      const hasUserDisabledMFA = account.otp_enabled === 0 && account.otp_secret === null;
+    // --- 2FA IMPLEMENTATION CONTROL ENGINE (UNIFIED FOR USER & ADMIN) ---
+    const hasDisabledMFA = account.otp_enabled === 0 && account.otp_secret === null;
 
-      if (!hasUserDisabledMFA) {
-        const isSetupPending = account.otp_secret === null;
-        const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
+    if (!hasDisabledMFA) {
+      const isSetupPending = account.otp_secret === null;
+      const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
 
-        req.session.pendingUser = {
-          id: String(account[idCol]),
-          username: account.username,
-          first_name: account.first_name,
-          last_name: account.last_name,
-          email: account.email,
-          role: role,
-          account_number: account.account_number || null,
-          otp_secret: plainSecret,
-          isSetupPending: isSetupPending
-        };
+      req.session.pendingUser = {
+        id: String(account[idCol]),
+        username: account.username,
+        first_name: account.first_name || 'Admin', // Safe fallback property for admin table rows
+        last_name: account.last_name || 'User',
+        email: account.email || '',
+        role: role,                                // Dynamic role context preservation ('user' or 'admin')
+        account_number: account.account_number || null,
+        otp_secret: plainSecret,
+        isSetupPending: isSetupPending
+      };
+      
+      req.session.otpAttempts = 0;
+
+      return req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
         
-        req.session.otpAttempts = 0;
-
-        return req.session.save((err) => {
-          if (err) {
-            console.error('Session save error:', err);
-            return res.status(500).json({ error: 'Internal server error' });
-          }
-          
-          return res.status(202).json({ 
-            message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code', 
-            requires2FA: true,
-            isSetupPending: isSetupPending
-          });
+        return res.status(202).json({ 
+          message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code', 
+          requires2FA: true,
+          isSetupPending: isSetupPending
         });
-      }
+      });
     }
-    // ------------------------------------------
+    // --------------------------------------------------------------------
 
     req.session.regenerate((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
