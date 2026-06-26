@@ -166,11 +166,14 @@ router.get('/transactions', requireAuth('user'), async (req, res) => {
               CASE WHEN t.amount < 0 THEN 'debit' ELSE 'credit' END AS type,
               ABS(t.amount) AS amount,
               t.description, t.created_at,
+              CONCAT_WS(' ', u.first_name, u.last_name) AS user_name,
+              u.account_number AS user_account,
               t.recipient_id,
               CONCAT_WS(' ', r.first_name, r.last_name) AS recipient_name,
               r.account_number AS recipient_account
          FROM transaction_history t
          LEFT JOIN users r ON r.user_id = t.recipient_id
+         LEFT JOIN users u ON u.user_id = t.user_id
         WHERE t.user_id = ?
         ORDER BY t.created_at DESC`,
       [req.session.user.id]
