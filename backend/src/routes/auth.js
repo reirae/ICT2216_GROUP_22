@@ -1,21 +1,65 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { body } = require('express-validator');
+const crypto = require('crypto');
 const { pool } = require('../config/database');
 const { writeLog } = require('../utils/logger');
 const { loginLimiter } = require('../middleware/rateLimiter');
 const { handleValidation, verifyCaptcha, PATTERNS } = require('../middleware/validation');
 const { requireAuth } = require('../middleware/auth');
 const { sendOtpEmail, verifyOtp } = require("../utils/otp");
-
-const crypto = require('crypto');
 const { verifyTOTP } = require('../utils/totp');
 
 const router = express.Router();
 
+// ====================================================================
+// CONSTANTS & SECURITY CONFIGURATIONS
+// ====================================================================
 const LOCK_THRESHOLD = Number(process.env.ACCOUNT_LOCK_THRESHOLD || 5);
 const LOCK_MINUTES = Number(process.env.ACCOUNT_LOCK_MINUTES || 15);
 const BCRYPT_ROUNDS = 12;
+
+const ENCRYPTION_KEY = Buffer.from(process.env.DB_ENCRYPTION_KEY || '0'.repeat(64), 'hex');
+const IV_LENGTH = 16;
+
+// Anti-Replay Cache Registry (Sitting at top scope to ensure clean instantiation)
+const usedTokensCache = new Set();
+setInterval(() => usedTokensCache.clear(), 30000); // Clear entries automatically every 30s
+
+// ====================================================================
+// CRYPTOGRAPHIC HELPER UTILITIES
+// ====================================================================
+function encryptSecret(text) {
+  if (!text) return null;
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return `${iv.toString('hex')}:${encrypted}:${authTag}`;
+}
+
+function decryptSecret(text) {
+  if (!text) return null;
+  if (!text.includes(':')) return text; // Backward compatibility fallback for legacy plain text rows
+  
+  const [ivHex, encrypted, tagHex] = text.split(':');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+function generateAccountNumber() {
+  let n = '';
+  for (let i = 0; i < 10; i++) n += Math.floor(Math.random() * 10).toString();
+  return n;
+}
+
+// ====================================================================
+// AUTHENTICATION ROUTES
+// ====================================================================
 
 // Generate a tiny arithmetic captcha and store the expected answer in the session.
 router.get('/captcha', (req, res) => {
@@ -91,7 +135,7 @@ router.post(
   (req, res) => handleLogin(req, res, 'user')
 );
 
-// Verify OTP
+// Verify OTP Challenge & Onboarding Complete
 router.post('/verify-otp', async (req, res) => {
   const { otp, tempSecret } = req.body;
 
@@ -107,7 +151,13 @@ router.post('/verify-otp', async (req, res) => {
     return res.status(400).json({ error: 'Verification token parameters are missing.' });
   }
 
-  // 2. Cryptographically evaluate the math using your speakeasy utility
+  // 2. Anti-Replay Verification Guard Check
+  const replayCacheKey = `${req.session.pendingUser.id}:${otp}`;
+  if (usedTokensCache.has(replayCacheKey)) {
+    return res.status(401).json({ error: 'This verification code has already been used. Please wait for a new token.' });
+  }
+
+  // Cryptographically evaluate the math using your speakeasy utility
   const isValid = verifyTOTP(otp, activeSecret);
 
   if (!isValid) {
@@ -130,16 +180,20 @@ router.post('/verify-otp', async (req, res) => {
     });
   }
 
+  // Token is valid! Mark it as spent for the remainder of its 30-second window
+  usedTokensCache.add(replayCacheKey);
+
   // 3. Handshake Success: Finalize the state configurations
   const user = req.session.pendingUser;
   const userId = user.id;
 
   try {
-    // SECURE WRITEBACK: Commit the key to the DB row row ONLY after token roundtrip verification succeeds
+    // SECURE WRITEBACK: Commit the key encrypted to the DB row ONLY after token roundtrip verification succeeds
     if (user.isSetupPending) {
+      const encryptedSecret = encryptSecret(activeSecret);
       await pool.execute(
         'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
-        [activeSecret, userId]
+        [encryptedSecret, userId]
       );
       await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
     }
@@ -165,7 +219,6 @@ router.post('/verify-otp', async (req, res) => {
     res.status(500).json({ error: 'Failed to complete authentication sequence.' });
   }
 });
-// ====================================================================
 
 // Admin login.
 router.post(
@@ -195,6 +248,7 @@ router.post('/logout', requireAuth(), (req, res) => {
   });
 });
 
+// Core internal identity evaluator logic handler
 async function handleLogin(req, res, role) {
   const { username, password } = req.body;
   const table = role === 'admin' ? 'admins' : 'users';
@@ -250,14 +304,13 @@ async function handleLogin(req, res, role) {
       );
     }
 
-    // --- 2FA IMPLEMENTATION ---
+    // --- 2FA IMPLEMENTATION CONTROL ENGINE ---
     if (role === 'user') {
-      // 1. An account is only considered safely disabled if BOTH conditions are met perfectly.
       const hasUserDisabledMFA = account.otp_enabled === 0 && account.otp_secret === null;
 
       if (!hasUserDisabledMFA) {
-        // 2. If it's not disabled, determine if they need first-time onboarding setup
         const isSetupPending = account.otp_secret === null;
+        const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
 
         req.session.pendingUser = {
           id: String(account[idCol]),
@@ -267,8 +320,8 @@ async function handleLogin(req, res, role) {
           email: account.email,
           role: role,
           account_number: account.account_number || null,
-          otp_secret: account.otp_secret || null, // Holds string or null
-          isSetupPending: isSetupPending          // True = Onboarding Page, False = Challenge Page
+          otp_secret: plainSecret,
+          isSetupPending: isSetupPending
         };
         
         req.session.otpAttempts = 0;
@@ -313,12 +366,6 @@ async function handleLogin(req, res, role) {
     await writeLog({ userRole: role, action: 'LOGIN', status: 'failure' });
     res.status(500).json({ error: 'Login failed' });
   }
-}
-
-function generateAccountNumber() {
-  let n = '';
-  for (let i = 0; i < 10; i++) n += Math.floor(Math.random() * 10).toString();
-  return n;
 }
 
 router.post('/check-email', verifyCaptcha, async (req, res) => {
@@ -378,19 +425,14 @@ router.post("/email-verify-otp", (req, res) => {
   }
 });
 
-// ====================================================================
-// START: PUBLIC HANDSHAKE 2FA ONBOARDING RESOURCE GENERATOR
-// ====================================================================
+// PUBLIC HANDSHAKE 2FA ONBOARDING RESOURCE GENERATOR
 router.post('/generate-onboarding-2fa', async (req, res) => {
   try {
-    // Structural Guard: Validate that a standard password authentication session framework exists
     if (!req.session.pendingUser || !req.session.pendingUser.isSetupPending) {
       return res.status(403).json({ error: 'Access denied. Session parameters are out of bounds.' });
     }
 
     const { username } = req.session.pendingUser;
-
-    // Use standard Speakeasy library modules natively to generate seed assets safely
     const secret = require('../utils/totp').generateSecret();
     const qrCode = await require('../utils/totp').generateQRCode(username, secret);
 
@@ -400,6 +442,5 @@ router.post('/generate-onboarding-2fa', async (req, res) => {
     res.status(500).json({ error: 'Failed to safely generate onboarding security streams.' });
   }
 });
-// ====================================================================
 
 module.exports = router;
