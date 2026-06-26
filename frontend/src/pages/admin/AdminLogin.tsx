@@ -17,7 +17,6 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // --- ADMIN 2FA HANDSHAKE STATES ---
   const [requires2FA, setRequires2FA] = useState(false);
   const [isOnboarding, setIsOnboarding] = useState(false); 
   const [showQR, setShowQR] = useState(false);             
@@ -45,11 +44,27 @@ export default function AdminLogin() {
     }
   };
 
+  // Helper helper to determine the correct target route matching username contexts
+  const getTargetRoute = (role: string, userNm: string) => {
+    const rawRole = role || 'admin';
+    const usernameLower = userNm.toLowerCase();
+    
+    let effectiveRole = rawRole;
+    if (rawRole === 'admin') {
+      if (usernameLower.includes('bus') || usernameLower.includes('business')) {
+        effectiveRole = 'business_admin';
+      } else {
+        effectiveRole = 'it_admin';
+      }
+    }
+    
+    return effectiveRole === 'it_admin' ? '/admin/logs' : '/admin/users';
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // STAGE 1: Standard Password Entry Verification Check
     if (!requires2FA && !isOnboarding) {
       if (!PATTERNS.username.test(username)) {
         setError('Invalid admin username format.');
@@ -68,7 +83,8 @@ export default function AdminLogin() {
           }
         } else if (response && response.user) {
           await refresh();
-          nav('/admin/users', { replace: true });
+          const targetPath = getTargetRoute(response.user.role as string, username);
+          nav(targetPath, { replace: true });
         }
       } catch (err: any) {
         setError(err.message || 'Login failed');
@@ -76,9 +92,7 @@ export default function AdminLogin() {
       } finally {
         setBusy(false);
       }
-    }
-    // STAGE 2: 2FA Token Validation Request Input
-    else {
+    } else {
       if (isOnboarding && !showQR) {
         setError('Please generate and scan your QR code before verifying.');
         return;
@@ -89,12 +103,14 @@ export default function AdminLogin() {
       }
       setBusy(true);
       try {
-        await api.post('/auth/verify-otp', { 
+        const verifyRes = await api.post<{ user?: { role: string } }>('/auth/verify-otp', { 
           otp, 
           tempSecret: isOnboarding ? tempSecret : undefined 
         });
-        
-        window.location.href = '/admin/users';
+
+        await refresh();
+        const detectedRole = verifyRes?.user?.role as string || 'admin';
+        window.location.href = getTargetRoute(detectedRole, username);
       } catch (err: any) {
         setError(err.response?.data?.error || err.message || 'Invalid verification code.');
       } finally {
