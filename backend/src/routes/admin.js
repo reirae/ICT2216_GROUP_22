@@ -32,7 +32,8 @@ const requireAdminRole = (allowedRoles) => {
    ========================================================================== */
 
 // All users (Business Admin view)
-router.get('/users', requireAuth('admin'), requireAdminRole(['business_admin']), async (req, res) => {
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
+router.get('/users', requireAuth(), requireAdminRole(['business_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT user_id, username, first_name, last_name, email, phone_number,
@@ -51,9 +52,10 @@ router.get('/users', requireAuth('admin'), requireAdminRole(['business_admin']),
 });
 
 // Create banking user (Business Admin)
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
 router.post(
   '/users',
-  requireAuth('admin'),
+  requireAuth(),
   requireAdminRole(['business_admin']),
   [
     body('username').matches(PATTERNS.username),
@@ -94,9 +96,10 @@ router.post(
 );
 
 // Update user details/status (Business Admin)
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
 router.put(
   '/users/:id',
-  requireAuth('admin'),
+  requireAuth(),
   requireAdminRole(['business_admin']),
   [
     body('first_name').optional().matches(PATTERNS.name),
@@ -107,10 +110,8 @@ router.put(
   ],
   handleValidation,
   async (req, res) => {
-    // 1. Keep the ID as a string or cast to BigInt to prevent losing precision
     const idStr = req.params.id;
     
-    // Simple regex check to ensure the route parameter contains only digits
     if (!/^\d+$/.test(idStr)) {
       return res.status(400).json({ error: 'Invalid user ID format.' });
     }
@@ -128,7 +129,6 @@ router.put(
     
     if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
     
-    // 2. Push the uncorrupted string representation of the BIGINT
     values.push(idStr);
 
     try {
@@ -157,7 +157,8 @@ router.put(
 );
 
 // View all transactions (Business Admin)
-router.get('/transactions', requireAuth('admin'), requireAdminRole(['business_admin']), async (req, res) => {
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
+router.get('/transactions', requireAuth(), requireAdminRole(['business_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT t.transaction_id, t.user_id, t.recipient_id,
@@ -187,7 +188,8 @@ router.get('/transactions', requireAuth('admin'), requireAdminRole(['business_ad
    ========================================================================== */
 
 // View system logs (IT Admin)
-router.get('/logs', requireAuth('admin'), requireAdminRole(['it_admin']), async (req, res) => {
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
+router.get('/logs', requireAuth(), requireAdminRole(['it_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT log_id, user_id, user_role, action, status, created_at
@@ -207,7 +209,7 @@ router.get('/logs', requireAuth('admin'), requireAdminRole(['it_admin']), async 
 // Create New Business Admin Account (IT Admin)
 router.post(
   '/create-business-admin',
-  requireAuth('admin'),
+  requireAuth(),
   requireAdminRole(['it_admin']),
   [
     body('username').matches(PATTERNS.username),
@@ -221,7 +223,6 @@ router.post(
   async (req, res) => {
     const { username, password, first_name, last_name, email, phone_number } = req.body;
     try {
-      // Check if username is taken in the admins table
       const [dupes] = await pool.execute('SELECT admin_id FROM admins WHERE username = ? LIMIT 1', [username]);
       if (dupes.length) {
         await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure' });
@@ -230,7 +231,6 @@ router.post(
 
       const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       
-      // Save all administrative profile fields accurately into the database
       await pool.execute(
         `INSERT INTO admins (username, password_hash, first_name, last_name, email, phone_number, role, otp_enabled)
          VALUES (?, ?, ?, ?, ?, ?, 'business_admin', 1)`,
@@ -246,8 +246,9 @@ router.post(
     }
   }
 );
+
 // List all administrative accounts (IT Admin view)
-router.get('/list-admins', requireAuth('admin'), requireAdminRole(['it_admin']), async (req, res) => {
+router.get('/list-admins', requireAuth(), requireAdminRole(['it_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT admin_id, username, first_name, last_name, email, phone_number, role, otp_enabled, created_at
@@ -255,7 +256,6 @@ router.get('/list-admins', requireAuth('admin'), requireAdminRole(['it_admin']),
          ORDER BY admin_id ASC`
     );
     
-    // Log the successful view action to the audit logs
     await writeLog({ 
       userId: req.session.user.id, 
       userRole: 'admin', 
@@ -267,7 +267,6 @@ router.get('/list-admins', requireAuth('admin'), requireAdminRole(['it_admin']),
   } catch (err) {
     console.error('[admin-list-admins]', err);
     
-    // Log the failure to the audit logs
     await writeLog({ 
       userId: req.session.user.id, 
       userRole: 'admin', 
