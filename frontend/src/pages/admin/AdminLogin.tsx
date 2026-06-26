@@ -46,19 +46,7 @@ export default function AdminLogin() {
 
   // Helper helper to determine the correct target route matching username contexts
   const getTargetRoute = (role: string, userNm: string) => {
-    const rawRole = role || 'admin';
-    const usernameLower = userNm.toLowerCase();
-    
-    let effectiveRole = rawRole;
-    if (rawRole === 'admin') {
-      if (usernameLower.includes('bus') || usernameLower.includes('business')) {
-        effectiveRole = 'business_admin';
-      } else {
-        effectiveRole = 'it_admin';
-      }
-    }
-    
-    return effectiveRole === 'it_admin' ? '/admin/logs' : '/admin/users';
+    return role === 'business_admin' ? '/admin/users' : '/admin/logs';
   };
 
   const onSubmit = async (e: React.FormEvent) => {

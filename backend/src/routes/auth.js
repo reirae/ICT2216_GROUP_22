@@ -308,9 +308,8 @@ async function handleLogin(req, res, role) {
         first_name: account.first_name || 'Admin', 
         last_name: account.last_name || 'User',
         email: account.email || '',
-        role: role,
+        role: account.role || role,
         account_number: account.account_number || null,
-        // FIXED: Cache the encrypted secret in session state context rather than decrypted plain string
         encrypted_otp_secret: account.otp_secret,
         isSetupPending: isSetupPending
       };
