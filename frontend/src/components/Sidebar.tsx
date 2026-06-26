@@ -90,9 +90,9 @@ export function Sidebar() {
         <div className="flex-shrink-0 p-4 pb-6">
           <div className="bg-blue-50 rounded-lg p-4">
             <p className="text-sm text-gray-600">Logged in as:</p>
-            <p className="text-gray-800">{user.first_name} {user.last_name}</p>
+            <p className="text-gray-800 break-words">{user.first_name} {user.last_name}</p>
             {user.role === 'user' && user.account_number && (
-              <p className="text-xs text-gray-500 mt-1">Acc: {user.account_number}</p>
+              <p className="text-xs text-gray-500 mt-1 break-words">Acc: {user.account_number}</p>
             )}
           </div>
         </div>
