@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, DollarSign, QrCode } from 'lucide-react';
 import { api } from '../api/client';
 import { formatMoney } from '../utils/format';
+import PageLoader from '../components/PageLoader';
 
 interface Recipient {
   user_recipient_id: number;
@@ -25,10 +26,14 @@ export default function Transfer() {
   const [success, setSuccess] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get<{ recipients: Recipient[] }>('/user/recipients').then((d) => setSaved(d.recipients)).catch(() => {});
-    api.get<DashboardData>('/user/dashboard').then((d) => setBalance(d.user.balance)).catch(() => {});
+    // Wait for both the saved recipients and the balance before showing the form.
+    Promise.allSettled([
+      api.get<{ recipients: Recipient[] }>('/user/recipients').then((d) => setSaved(d.recipients)),
+      api.get<DashboardData>('/user/dashboard').then((d) => setBalance(d.user.balance)),
+    ]).finally(() => setLoading(false));
   }, []);
 
   const findByIdentifier = async () => {
@@ -80,6 +85,8 @@ export default function Transfer() {
       setBusy(false);
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>

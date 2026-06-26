@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { PATTERNS } from '../utils/format';
 import { AlertTriangle } from 'lucide-react';
+import PageLoader from '../components/PageLoader';
 
 interface ProfileData {
   user: {
@@ -122,7 +123,7 @@ export default function Profile() {
   };
 
   if (error) return <p className="text-red-600">{error}</p>;
-  if (!data) return <p className="text-gray-500">Loading…</p>;
+  if (!data) return <PageLoader />;
   const u = data.user;
 
   return (

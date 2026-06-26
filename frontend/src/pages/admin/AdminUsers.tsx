@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, XCircle, Filter, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { PATTERNS, formatMoney } from '../../utils/format';
+import PageLoader from '../../components/PageLoader';
 
 interface AdminUser {
   user_id: number;
@@ -25,13 +26,15 @@ export default function AdminUsers() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ ...blank });
   const [formError, setFormError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = () =>
     api.get<{ users: AdminUser[] }>('/admin/users')
       .then((d) => setUsers(d.users))
       .catch((e) => setError(e.message));
 
-  useEffect(() => { load(); }, []);
+  // Spinner only on the initial load; later refreshes keep the table visible.
+  useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -76,6 +79,8 @@ export default function AdminUsers() {
       setFormError(e.message);
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>

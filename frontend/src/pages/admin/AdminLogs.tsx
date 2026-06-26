@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, XCircle } from 'lucide-react';
 import { api } from '../../api/client';
 import { formatDate } from '../../utils/format';
+import PageLoader from '../../components/PageLoader';
 
 interface LogRow {
   log_id: number;
@@ -18,11 +19,13 @@ export default function AdminLogs() {
   const [role, setRole] = useState('all');
   const [status, setStatus] = useState('all');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get<{ logs: LogRow[] }>('/admin/logs')
       .then((d) => setRows(d.logs))
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
   const filtered = useMemo(() => {
@@ -38,6 +41,8 @@ export default function AdminLogs() {
       );
     });
   }, [rows, search, role, status]);
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>
