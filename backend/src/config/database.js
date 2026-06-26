@@ -12,6 +12,8 @@ const pool = mysql.createPool({
   multipleStatements: false,
   dateStrings: true,
   namedPlaceholders: false,
+  supportBigNumbers: true,
+  bigNumberStrings: true
 });
 
 async function ping() {

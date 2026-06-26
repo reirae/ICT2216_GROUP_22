@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { PATTERNS } from '../utils/format';
+import { AlertTriangle } from 'lucide-react';
 
 interface ProfileData {
   user: {
@@ -27,6 +28,9 @@ export default function Profile() {
   const [mfaSuccess, setMfaSuccess] = useState('');
   const [mfaError, setMfaError] = useState('');
 
+  // --- UI Layout Controls ---
+  const [isConfirmingDisable, setIsConfirmingDisable] = useState(false); // In-card confirmation block state
+
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -42,7 +46,7 @@ export default function Profile() {
     try {
       setError('');
       setMfaSuccess('');
-      setMfaError(''); // Clear old errors
+      setMfaError(''); 
       const response = await api.post<{ qrCode: string; tempSecret: string }>('/user/generate-2fa');
       setQrCode(response.qrCode);
       setTempSecret(response.tempSecret); 
@@ -57,7 +61,7 @@ export default function Profile() {
     try {
       setError('');
       setMfaSuccess('');
-      setMfaError(''); // Clear old errors
+      setMfaError(''); 
       
       const response = await api.post<{ message: string }>('/user/verify-and-activate-2fa', {
         token: verificationCode,
@@ -73,8 +77,28 @@ export default function Profile() {
         setData({ ...data, user: { ...data.user, status: 'active_mfa', hasMfaEnabled: 1 } });
       }
     } catch (e: any) {
-      // Catch the API error message safely without triggering line 62's layout wipe
       setMfaError(e.response?.data?.error || e.message || 'Invalid activation token code. Please retry.');
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    setBusy(true);
+    try {
+      setError('');
+      setMfaSuccess('');
+      setMfaError('');
+
+      const response = await api.post<{ message: string }>('/user/disable-2fa');
+      setMfaSuccess(response.message);
+      setIsConfirmingDisable(false);
+
+      if (data?.user) {
+        setData({ ...data, user: { ...data.user, hasMfaEnabled: 0 } });
+      }
+    } catch (e: any) {
+      setMfaError(e.response?.data?.error || e.message || 'Failed to safely remove authentication parameters.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -137,6 +161,7 @@ export default function Profile() {
             </button>
           </form>
         </div>
+
         {/* Two-Factor Authentication Card */}
         <div className="bg-white rounded-lg shadow p-4 sm:p-6 flex flex-col justify-between">
           <div>
@@ -145,20 +170,19 @@ export default function Profile() {
               Enhance your digital banking protection by linking an authenticator application (e.g., Google Authenticator).
             </p>
 
-            {/* Display verification confirmation statements */}
             {mfaSuccess && (
               <div className="bg-green-50 border border-green-300 text-green-700 px-4 py-3 rounded-lg text-sm mb-4">
                 {mfaSuccess}
               </div>
             )}
 
-            {/* --- Display verification confirmation statements --- */}
             {mfaError && (
               <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm mb-4 w-full text-center">
                 {mfaError}
               </div>
             )}
             
+            {/* Display Setup QR Step */}
             {qrCode && (
               <div className="flex flex-col items-center bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4 animate-fade-in">
                 <p className="text-xs text-gray-500 font-medium mb-2 text-center uppercase tracking-wider">
@@ -185,29 +209,93 @@ export default function Profile() {
                   >
                     Confirm & Activate 2FA
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQrCode(null);
+                      setTempSecret(null);
+                      setVerificationCode('');
+                      setMfaError('');
+                    }}
+                    className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-2 rounded-md font-medium transition-colors border border-gray-200"
+                  >
+                    Cancel & Go Back
+                  </button>
                 </form>
               </div>
             )}
 
-            {!qrCode && !mfaSuccess && (
+            {/* Custom Inline Warning Block (Replaces the ugly popup alert) */}
+            {isConfirmingDisable && (
+              <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg mb-4 animate-fade-in text-sm">
+                <div className="flex items-start gap-2 font-semibold mb-1 text-red-700">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <span>DANGEROUS SECURITY DOWNGRADE</span>
+                </div>
+                <p className="text-xs text-red-600 mb-3">
+                  Disabling Two-Factor Authentication significantly lowers your security perimeter against credential theft and fraud vectors.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleDisable2FA}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs rounded font-medium transition-colors"
+                  >
+                    Yes, Remove Protection
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingDisable(false)}
+                    className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs rounded font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!qrCode && !isConfirmingDisable && (
               <div className="text-sm text-gray-500 text-center py-4">
                 {u.hasMfaEnabled === 1 ? (
                   <span className="text-green-600 font-medium">✓ Two-Factor Authentication is currently active on your account.</span>
                 ) : (
-                  "2FA setup is pending activation setup."
+                  <span className="text-gray-500">2FA setup is pending activation setup.</span>
                 )}
               </div>
             )}
           </div>
 
-          {!qrCode && (
-            <button
-              type="button"
-              onClick={handleSetup2FA}
-              className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 font-medium transition-colors mt-auto"
-            >
-              {u.hasMfaEnabled === 1 ? 'Regenerate Authentication Secret' : 'Enable Authenticator 2FA'}
-            </button>
+          {/* Dual Action Option Controls */}
+          {!qrCode && !isConfirmingDisable && (
+            <div className="space-y-2 mt-auto">
+              {u.hasMfaEnabled === 1 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSetup2FA}
+                    className="w-full bg-emerald-600 text-white py-2.5 rounded-lg hover:bg-emerald-700 font-medium transition-colors text-sm"
+                  >
+                    Regenerate Authentication Secret QR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingDisable(true)}
+                    className="w-full bg-red-100 text-red-700 py-2.5 rounded-lg hover:bg-red-200 font-medium transition-colors text-sm"
+                  >
+                    Disable Authenticator 2FA Protection
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSetup2FA}
+                  className="w-full bg-emerald-600 text-white py-3 rounded-lg hover:bg-emerald-700 font-medium transition-colors"
+                >
+                  Enable Authenticator 2FA
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
