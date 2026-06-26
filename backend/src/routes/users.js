@@ -240,8 +240,11 @@ router.post(
 
 router.delete('/recipients/:id', requireAuth('user'), async (req, res) => {
   const userId = req.session.user.id;
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+  // IDs can exceed JS's safe integer range (2^53-1), so keep the param as a
+  // string. Number() would silently corrupt large values; MySQL compares the
+  // numeric string to the BIGINT column by value.
+  const id = String(req.params.id);
+  if (!/^[0-9]+$/.test(id)) return res.status(400).json({ error: 'Invalid id' });
   try {
     const [result] = await pool.execute(
       'DELETE FROM user_recipients WHERE user_recipient_id = ? AND user_id = ?',

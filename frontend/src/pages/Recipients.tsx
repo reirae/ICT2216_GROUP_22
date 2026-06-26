@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, User, Users } from 'lucide-react';
 import { api } from '../api/client';
 import PageLoader from '../components/PageLoader';
+import DeleteConfirmation from '../components/DeleteConfirmation';
 
 interface Recipient {
   user_recipient_id: number;
@@ -19,6 +20,8 @@ export default function Recipients() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<Recipient | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () =>
     api.get<{ recipients: Recipient[] }>('/user/recipients')
@@ -44,10 +47,19 @@ export default function Recipients() {
     }
   };
 
-  const remove = async (id: number) => {
-    if (!confirm('Remove this recipient?')) return;
-    try { await api.del(`/user/recipients/${id}`); await load(); }
-    catch (e: any) { setError(e.message); }
+  const confirmRemove = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setError('');
+    try {
+      await api.del(`/user/recipients/${pendingDelete.user_recipient_id}`);
+      setPendingDelete(null);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (loading) return <PageLoader />;
@@ -98,7 +110,7 @@ export default function Recipients() {
                 <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                   <User className="w-6 h-6 text-blue-600" />
                 </div>
-                <button onClick={() => remove(r.user_recipient_id)} className="text-red-600 hover:text-red-700" aria-label="Delete recipient">
+                <button onClick={() => { setError(''); setPendingDelete(r); }} className="text-red-600 hover:text-red-700" aria-label="Delete recipient">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -117,6 +129,20 @@ export default function Recipients() {
           </div>
         )
       )}
+
+      <DeleteConfirmation
+        open={pendingDelete !== null}
+        title="Remove recipient"
+        message={
+          pendingDelete
+            ? `Remove ${pendingDelete.first_name} ${pendingDelete.last_name} (${pendingDelete.account_number}) from your saved recipients? You can add them again later.`
+            : ''
+        }
+        confirmLabel="Remove"
+        busy={deleting}
+        onConfirm={confirmRemove}
+        onCancel={() => { if (!deleting) setPendingDelete(null); }}
+      />
     </div>
   );
 }
