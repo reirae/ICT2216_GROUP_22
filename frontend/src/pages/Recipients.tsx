@@ -34,9 +34,23 @@ export default function Recipients() {
 
   const add = async () => {
     setError(''); setInfo('');
-    if (!identifier.trim()) return setError('Account number or phone is required.');
+    
+    const inputVal = identifier.trim();
+
+    if (!inputVal) return setError('Account number or phone is required.');
+
+    const looksLikePhone = inputVal.startsWith('+') || /^[689]\d{7}$/.test(inputVal);
+
+    if (looksLikePhone) {
+      const sgPhoneRegex = /^\+65[689]\d{7}$|^[689]\d{7}$/;
+      if (!sgPhoneRegex.test(inputVal)) return setError('Invalid Singapore phone number (8 digits).');
+    }
+    else {
+      if (!/^\d{10,20}$/.test(inputVal)) return setError('Invalid account number (10-20 digits).');
+    }
+
     try {
-      await api.post('/user/recipients', { identifier: identifier.trim() });
+      await api.post('/user/recipients', { identifier: inputVal });
       setIdentifier('');
       setShowAdd(false);
       setInfo('Recipient saved.');
@@ -82,14 +96,14 @@ export default function Recipients() {
         <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
           <h3 className="text-lg sm:text-xl text-gray-800 mb-4">Add New Recipient</h3>
           <p className="text-xs text-gray-500 mb-2">
-            Enter the recipient's <strong>account number</strong> (10-20 digits) or <strong>phone number</strong>.
+            Enter the recipient's <strong>account number</strong> (10-20 digits) or <strong>phone number</strong> (8 digits).
           </p>
           <div className="space-y-4">
             <input
               type="text"
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
-              placeholder="e.g. 1234567890 or +6598765001"
+              placeholder="e.g. 1234567890 (account number) or 98765001 (phone number)"
               maxLength={30}
               className="w-full px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
@@ -107,15 +121,15 @@ export default function Recipients() {
           {items.map((r) => (
             <div key={r.user_recipient_id} className="bg-white rounded-lg shadow p-6">
               <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
                   <User className="w-6 h-6 text-blue-600" />
                 </div>
-                <button onClick={() => { setError(''); setPendingDelete(r); }} className="text-red-600 hover:text-red-700" aria-label="Delete recipient">
+                <button onClick={() => { setError(''); setPendingDelete(r); }} className="text-red-600 hover:text-red-700 ml-2 flex-shrink-0" aria-label="Delete recipient">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-              <h3 className="text-lg text-gray-800 mb-1">{r.first_name} {r.last_name}</h3>
-              <p className="text-sm text-gray-600 mb-1">{r.account_number}</p>
+              <h3 className="text-lg text-gray-800 mb-1 truncate">{r.first_name} {r.last_name}</h3>
+              <p className="text-sm text-gray-600 mb-1 truncate">{r.account_number}</p>
               <p className="text-xs text-gray-500">SecureBank</p>
             </div>
           ))}
