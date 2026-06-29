@@ -42,7 +42,7 @@ function encryptSecret(text) {
 function decryptSecret(text) {
   if (!text) return null;
   if (!text.includes(':')) return text; // Backward compatibility fallback for legacy plain text rows
-  
+
   const [ivHex, encrypted, tagHex] = text.split(':');
   const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
   decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
@@ -166,17 +166,17 @@ router.post('/verify-otp', async (req, res) => {
   if (!isValid) {
     req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
     await writeLog({ userId: req.session.pendingUser?.id || null, userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
-    
+
     if (req.session.otpAttempts >= 3) {
       delete req.session.pendingUser;
       delete req.session.otpAttempts;
-      
+
       return req.session.save((err) => {
         if (err) return res.status(500).json({ error: 'Session save error' });
         res.status(401).json({ error: 'Too many failed attempts. Please sign in again.' });
       });
     }
-    
+
     return req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session save error' });
       res.status(401).json({ error: 'Invalid verification code.' });
@@ -203,16 +203,16 @@ router.post('/verify-otp', async (req, res) => {
 
     delete user.otp_secret; // Data Minimization: Wipe memory references before serialization
     delete user.isSetupPending;
-    
+
     req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
-      
+
       req.session.user = user;
-      
+
       // Forces the server to finish saving the session memory before replying
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-        
+
         await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success' });
         res.json({ user: req.session.user });
       });
@@ -326,7 +326,7 @@ async function handleLogin(req, res, role) {
           otp_secret: plainSecret,
           isSetupPending: isSetupPending
         };
-        
+
         req.session.otpAttempts = 0;
 
         return req.session.save((err) => {
@@ -334,9 +334,9 @@ async function handleLogin(req, res, role) {
             console.error('Session save error:', err);
             return res.status(500).json({ error: 'Internal server error' });
           }
-          
-          return res.status(202).json({ 
-            message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code', 
+
+          return res.status(202).json({
+            message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
             requires2FA: true,
             isSetupPending: isSetupPending
           });
@@ -359,7 +359,7 @@ async function handleLogin(req, res, role) {
 
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-        
+
         writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success' });
         res.json({ user: req.session.user });
       });
@@ -389,8 +389,9 @@ router.post('/reset-password', async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized. Please complete OTP verification first.' });
     }
 
-    if (!newPassword || !PATTERNS.password.test(newPassword)) {
-      return res.status(400).json({ error: 'Password does not meet requirements' });
+    // Validate PIN: exactly 6 digits
+    if (!newPassword || !/^\d{6}$/.test(newPassword)) {
+      return res.status(400).json({ error: 'PIN must be exactly 6 digits.' });
     }
 
     const password_hash = await bcrypt.hash(newPassword, 12);
@@ -399,19 +400,19 @@ router.post('/reset-password', async (req, res) => {
       [password_hash, email]
     );
 
-    // Clear reset session flags after successful reset
+    // Clear reset session flags
     delete req.session.otpVerified;
     delete req.session.resetEmail;
 
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
       writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'success' });
-      res.json({ message: 'Password reset successfully' });
+      res.json({ message: 'PIN reset successfully' });
     });
   } catch (err) {
     console.error('[reset-password]', err);
     await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'failure' });
-    res.status(500).json({ error: 'Password reset failed' });
+    res.status(500).json({ error: 'PIN reset failed' });
   }
 });
 
