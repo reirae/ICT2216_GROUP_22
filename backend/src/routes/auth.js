@@ -41,8 +41,8 @@ function encryptSecret(text) {
 
 function decryptSecret(text) {
   if (!text) return null;
-  if (!text.includes(':')) return text; 
-  
+  if (!text.includes(':')) return text;
+
   const [ivHex, encrypted, tagHex] = text.split(':');
   const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
   decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
@@ -80,48 +80,130 @@ router.get('/me', (req, res) => {
   res.status(401).json({ user: null });
 });
 
+// POST /api/auth/register-send-otp
+// Validates registration data and sends OTP before creating the account
 router.post(
-  '/register',
+  '/register-send-otp',
   [
     body('username').matches(PATTERNS.username).withMessage('Invalid username'),
     body('password').matches(PATTERNS.pin).withMessage('PIN must be exactly 6 digits'),
-    body('first_name').matches(PATTERNS.name).withMessage('First name cannot contain numbers or symbols'),
-    body('last_name').matches(PATTERNS.name).withMessage('Last name cannot contain numbers or symbols'),
-    body('email').matches(PATTERNS.email),
-    body('phone_number').matches(PATTERNS.phoneSG).withMessage('Phone number must be exactly 8 digits (no +65)'),
+    body('first_name').matches(PATTERNS.name).withMessage('Invalid first name'),
+    body('last_name').matches(PATTERNS.name).withMessage('Invalid last name'),
+    body('email').matches(PATTERNS.email).withMessage('Invalid email'),
+    body('phone_number').matches(PATTERNS.phoneSG).withMessage('Invalid phone number'),
   ],
   handleValidation,
   async (req, res) => {
-    const { username, password, first_name, last_name, email, phone_number } = req.body;
-
+    const { username, email } = req.body;
     try {
+      // Check for duplicates before sending OTP
       const [dupes] = await pool.execute(
-        'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
-        [username, email, phone_number]
+        'SELECT user_id FROM users WHERE username = ? OR email = ? LIMIT 1',
+        [username, email]
       );
       if (dupes.length) {
-        return res.status(409).json({ error: 'Username, email, or phone number already in use' });
+        return res.status(409).json({ error: 'Username or email already in use' });
       }
 
-      const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-      const accountNumber = generateAccountNumber();
+      // Send OTP to the provided email
+      await sendOtpEmail(email, req.body.first_name);
 
-      await pool.execute(
-        `INSERT INTO users
-          (username, password_hash, first_name, last_name, email, phone_number, account_number, balance, status, otp_secret, otp_enabled)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1)`,
-        [username, password_hash, first_name, last_name, email, phone_number, accountNumber, 0]
-      );
+      // Store pending registration data in session
+      req.session.pendingRegistration = {
+        username: req.body.username,
+        password: req.body.password,
+        first_name: req.body.first_name,
+        last_name: req.body.last_name,
+        email: req.body.email,
+        phone_number: req.body.phone_number,
+      };
+      req.session.registrationOtpVerified = false;
 
-      await writeLog({ userRole: 'user', action: 'REGISTER', status: 'success' });
-      res.status(201).json({ message: 'Account created. You can now sign in.' });
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ error: 'Session error' });
+        res.json({ message: 'OTP sent successfully' });
+      });
     } catch (err) {
-      console.error('[register]', err);
-      await writeLog({ userRole: 'user', action: 'REGISTER', status: 'failure' });
-      res.status(500).json({ error: 'Registration failed' });
+      console.error('[register-send-otp]', err);
+      res.status(500).json({ error: 'Failed to send verification code' });
     }
   }
 );
+
+// POST /api/auth/register-verify-otp
+router.post('/register-verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Email and OTP are required' });
+  }
+
+  // Ensure registration session exists
+  if (!req.session.pendingRegistration || req.session.pendingRegistration.email !== email) {
+    return res.status(400).json({ error: 'Invalid registration session' });
+  }
+
+  const valid = verifyOtp(email, otp);
+  if (!valid) {
+    return res.status(400).json({ error: 'Invalid or expired code' });
+  }
+
+  req.session.registrationOtpVerified = true;
+
+  req.session.save((err) => {
+    if (err) return res.status(500).json({ error: 'Session error' });
+    res.json({ message: 'OTP verified successfully' });
+  });
+});
+
+// POST /api/auth/register — updated to require OTP verification
+router.post('/register', async (req, res) => {
+  // GATE: Reject if OTP was never verified
+  if (
+    !req.session.registrationOtpVerified ||
+    !req.session.pendingRegistration ||
+    req.session.pendingRegistration.email !== req.body.email
+  ) {
+    return res.status(403).json({ error: 'Please complete email verification first' });
+  }
+
+  const { username, password, first_name, last_name, email, phone_number } =
+    req.session.pendingRegistration;
+
+  try {
+    const [dupes] = await pool.execute(
+      'SELECT user_id FROM users WHERE username = ? OR email = ? LIMIT 1',
+      [username, email]
+    );
+    if (dupes.length) {
+      return res.status(409).json({ error: 'Username or email already in use' });
+    }
+
+    const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const accountNumber = generateAccountNumber();
+
+    await pool.execute(
+      `INSERT INTO users
+        (username, password_hash, first_name, last_name, email, phone_number, account_number, balance, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [username, password_hash, first_name, last_name, email, phone_number || null, accountNumber, 0]
+    );
+
+    // Clear registration session flags
+    delete req.session.pendingRegistration;
+    delete req.session.registrationOtpVerified;
+
+    req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      writeLog({ userRole: 'user', action: 'REGISTER', status: 'success' });
+      res.status(201).json({ message: 'Account created. You can now sign in.' });
+    });
+  } catch (err) {
+    console.error('[register]', err);
+    await writeLog({ userRole: 'user', action: 'REGISTER', status: 'failure' });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
 
 router.post(
   '/login',
@@ -145,8 +227,8 @@ router.post('/verify-otp', async (req, res) => {
   }
 
   // FIXED: Decrypt the master secret from storage session frame safely at runtime evaluation loop
-  const activeSecret = req.session.pendingUser.isSetupPending 
-    ? tempSecret 
+  const activeSecret = req.session.pendingUser.isSetupPending
+    ? tempSecret
     : decryptSecret(req.session.pendingUser.encrypted_otp_secret);
 
   if (!otp || !activeSecret) {
@@ -305,7 +387,7 @@ async function handleLogin(req, res, role) {
       req.session.pendingUser = {
         id: String(account[idCol]),
         username: account.username,
-        first_name: account.first_name || 'Admin', 
+        first_name: account.first_name || 'Admin',
         last_name: account.last_name || 'User',
         email: account.email || '',
         role: account.role || role,
@@ -313,7 +395,7 @@ async function handleLogin(req, res, role) {
         encrypted_otp_secret: account.otp_secret,
         isSetupPending: isSetupPending
       };
-      
+
       req.session.otpAttempts = 0;
 
       return req.session.save((err) => {
@@ -321,9 +403,9 @@ async function handleLogin(req, res, role) {
           console.error('Session save error:', err);
           return res.status(500).json({ error: 'Internal server error' });
         }
-        
-        return res.status(202).json({ 
-          message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code', 
+
+        return res.status(202).json({
+          message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
           requires2FA: true,
           isSetupPending: isSetupPending
         });

@@ -112,17 +112,30 @@ export default function ResetPassword() {
   };
 
   // Resend OTP
+  // NOTE: Turnstile tokens are single-use and expire quickly. The token from
+  // the email stage is already consumed/stale by the time the user reaches
+  // this screen, so we trigger the invisible widget here and wait for a
+  // fresh token before calling the resend endpoint.
   const handleResend = async () => {
     if (cooldown > 0) return;
     setError('');
     setBusy(true);
     try {
-      await api.post('/auth/email-send-otp', { email, username });
+      turnstileRef.current?.execute();
+      const token = await turnstileRef.current?.getResponsePromise();
+
+      if (!token) {
+        setError('Please complete the verification check.');
+        return;
+      }
+
+      await api.post('/auth/email-send-otp', { email, captcha: token, username });
       setOtp('');
       setCooldown(30);
     } catch (err: any) {
       setError(err.message || 'Failed to resend code.');
     } finally {
+      resetTurnstile(); // token is single-use; clear it either way
       setBusy(false);
     }
   };
@@ -267,6 +280,16 @@ export default function ResetPassword() {
                   {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend Code'}
                 </button>
               </div>
+              {/* Invisible widget, manually triggered — only generates a token when
+                  Resend is actually clicked, so it's never stale by the time it's used */}
+              <Turnstile
+                ref={turnstileRef}
+                options={{ size: 'invisible', execution: 'execute' }}
+                siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!}
+                onSuccess={(token) => setCaptcha(token)}
+                onError={() => setError('Verification failed. Please try again.')}
+                onExpire={() => setCaptcha('')}
+              />
 
               {error && (
                 <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm text-center">
