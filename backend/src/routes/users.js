@@ -297,7 +297,7 @@ router.post(
   handleValidation,
   async (req, res) => {
     const userId = req.session.user.id;
-    const recipientId = Number(req.body.recipient_id);
+    const recipientId = req.body.recipient_id.toString();
     const amount = Number.parseFloat(req.body.amount);
     const description = (req.body.description || 'Fund transfer')
       .toString()

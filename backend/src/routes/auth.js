@@ -371,7 +371,7 @@ async function handleLogin(req, res, role) {
   }
 }
 
-router.post('/check-email', verifyCaptcha, async (req, res) => {
+router.post('/check-email', async (req, res) => {
   const { email } = req.body;
   const [rows] = await pool.execute(
     'SELECT username FROM users WHERE email = ? LIMIT 1',
@@ -384,13 +384,30 @@ router.post('/check-email', verifyCaptcha, async (req, res) => {
 router.post('/reset-password', async (req, res) => {
   const { email, newPassword } = req.body;
   try {
+    // GATE: Reject if OTP was never verified in this session
+    if (!req.session.otpVerified || req.session.resetEmail !== email) {
+      return res.status(403).json({ error: 'Unauthorized. Please complete OTP verification first.' });
+    }
+
+    if (!newPassword || !PATTERNS.password.test(newPassword)) {
+      return res.status(400).json({ error: 'Password does not meet requirements' });
+    }
+
     const password_hash = await bcrypt.hash(newPassword, 12);
     await pool.execute(
       'UPDATE users SET password_hash = ? WHERE email = ?',
       [password_hash, email]
     );
-    await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'success' });
-    res.json({ message: 'Password reset successfully' });
+
+    // Clear reset session flags after successful reset
+    delete req.session.otpVerified;
+    delete req.session.resetEmail;
+
+    req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'success' });
+      res.json({ message: 'Password reset successfully' });
+    });
   } catch (err) {
     console.error('[reset-password]', err);
     await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'failure' });
@@ -398,30 +415,47 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-// POST /api/auth/send-otp
-router.post("/email-send-otp", async (req, res) => {
+router.post("/email-send-otp", verifyCaptcha, async (req, res) => {
   try {
     const { email, username } = req.body;
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     await sendOtpEmail(email, username);
-    res.json({ message: "OTP sent successfully" });
+
+    // Save email in session and mark OTP as not yet verified
+    req.session.resetEmail = email;
+    req.session.otpVerified = false;
+
+    req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      res.json({ message: "OTP sent successfully" });
+    });
   } catch (err) {
     console.error("Failed to send OTP:", err);
     res.status(500).json({ error: "Failed to send OTP" });
   }
 });
 
-// POST /api/auth/verify-otp
 router.post("/email-verify-otp", (req, res) => {
   try {
     const { email, otp } = req.body;
     if (!email || !otp) return res.status(400).json({ error: "Email and OTP are required" });
 
+    // Ensure the email matches what was sent to
+    if (req.session.resetEmail !== email) {
+      return res.status(400).json({ error: 'Invalid reset session' });
+    }
+
     const valid = verifyOtp(email, otp);
     if (!valid) return res.status(400).json({ error: "Invalid or expired OTP" });
 
-    res.json({ message: "OTP verified successfully" });
+    // Mark OTP as verified in session
+    req.session.otpVerified = true;
+
+    req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      res.json({ message: "OTP verified successfully" });
+    });
   } catch (err) {
     console.error("Failed to verify OTP:", err);
     res.status(500).json({ error: "Failed to verify OTP" });

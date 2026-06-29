@@ -58,9 +58,14 @@ export default function ResetPassword() {
       return;
     }
 
+    // Guard: don't submit without a captcha token
+    if (!captcha) {
+      setError('Please complete the verification check.');
+      return;
+    }
+
     setBusy(true);
     try {
-      // Check if email exists in the database
       const res = await api.post<{ exists: boolean; username: string }>(
         '/auth/check-email',
         { email }
@@ -68,18 +73,18 @@ export default function ResetPassword() {
 
       if (!res.exists) {
         setError('No account found with that email address.');
+        resetTurnstile(); // reset on failure
         return;
       }
 
       setUsername(res.username);
-
-      // Send OTP to that email
       await api.post('/auth/email-send-otp', { email, captcha, username: res.username });
 
       setStage('otp');
       setCooldown(30);
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.');
+      resetTurnstile(); // reset on error
     } finally {
       setBusy(false);
     }
@@ -208,11 +213,11 @@ export default function ResetPassword() {
                 </div>
               )}
 
-              <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
+              <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')} />
 
               <button
                 type="submit"
-                disabled={busy}
+                disabled={busy || !captcha}
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium"
               >
                 {busy ? 'Checking…' : 'Send Verification Code'}
