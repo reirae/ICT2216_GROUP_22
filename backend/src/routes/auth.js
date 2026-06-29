@@ -22,9 +22,9 @@ const BCRYPT_ROUNDS = 12;
 const ENCRYPTION_KEY = Buffer.from(process.env.DB_ENCRYPTION_KEY || '0'.repeat(64), 'hex');
 const IV_LENGTH = 16;
 
-// Anti-Replay Cache Registry (Sitting at top scope to ensure clean instantiation)
+// Anti-Replay Cache Registry
 const usedTokensCache = new Set();
-setInterval(() => usedTokensCache.clear(), 30000); // Clear entries automatically every 30s
+setInterval(() => usedTokensCache.clear(), 30000);
 
 // ====================================================================
 // CRYPTOGRAPHIC HELPER UTILITIES
@@ -41,13 +41,13 @@ function encryptSecret(text) {
 
 function decryptSecret(text) {
   if (!text) return null;
-  if (!text.includes(':')) return text; // Backward compatibility fallback for legacy plain text rows
-
+  if (!text.includes(':')) return text; 
+  
   const [ivHex, encrypted, tagHex] = text.split(':');
   const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
   decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
   let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
+  decipher.final('utf8'); // Complete cryptographic validation
   return decrypted;
 }
 
@@ -57,11 +57,15 @@ function generateAccountNumber() {
   return n;
 }
 
+// Attach utilities to the router object directly so other files can require them safely 
+// without altering Express router middleware exports!
+router.encryptSecret = encryptSecret;
+router.decryptSecret = decryptSecret;
+
 // ====================================================================
 // AUTHENTICATION ROUTES
 // ====================================================================
 
-// Generate a tiny arithmetic captcha and store the expected answer in the session.
 router.get('/captcha', (req, res) => {
   const a = Math.floor(Math.random() * 9) + 1;
   const b = Math.floor(Math.random() * 9) + 1;
@@ -69,7 +73,6 @@ router.get('/captcha', (req, res) => {
   res.json({ question: `What is ${a} + ${b}?` });
 });
 
-// Current session info (used by the frontend on app boot).
 router.get('/me', (req, res) => {
   if (req.session && req.session.user) {
     return res.json({ user: req.session.user });
@@ -77,7 +80,6 @@ router.get('/me', (req, res) => {
   res.status(401).json({ user: null });
 });
 
-// User registration.
 router.post(
   '/register',
   [
@@ -101,16 +103,13 @@ router.post(
         return res.status(409).json({ error: 'Username, email, or phone number already in use' });
       }
 
-      // The PIN is hashed exactly like a password and stored in password_hash.
       const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       const accountNumber = generateAccountNumber();
 
-      // New accounts start with 2FA armed but not yet set up: otp_enabled = TRUE
-      // and otp_secret = NULL, so the first login forces TOTP onboarding.
       await pool.execute(
         `INSERT INTO users
           (username, password_hash, first_name, last_name, email, phone_number, account_number, balance, status, otp_secret, otp_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1)`,
         [username, password_hash, first_name, last_name, email, phone_number, accountNumber, 0]
       );
 
@@ -124,7 +123,6 @@ router.post(
   }
 );
 
-// User login.
 router.post(
   '/login',
   loginLimiter,
@@ -138,29 +136,28 @@ router.post(
   (req, res) => handleLogin(req, res, 'user')
 );
 
-// Verify OTP Challenge & Onboarding Complete
 router.post('/verify-otp', async (req, res) => {
   const { otp, tempSecret } = req.body;
 
-  // 1. Structural Check: Verify that an active login handshake session frame is alive
   if (!req.session.pendingUser) {
     await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
     return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
 
-  const activeSecret = req.session.pendingUser.isSetupPending ? tempSecret : req.session.pendingUser.otp_secret;
+  // FIXED: Decrypt the master secret from storage session frame safely at runtime evaluation loop
+  const activeSecret = req.session.pendingUser.isSetupPending 
+    ? tempSecret 
+    : decryptSecret(req.session.pendingUser.encrypted_otp_secret);
 
   if (!otp || !activeSecret) {
     return res.status(400).json({ error: 'Verification token parameters are missing.' });
   }
 
-  // 2. Anti-Replay Verification Guard Check
   const replayCacheKey = `${req.session.pendingUser.id}:${otp}`;
   if (usedTokensCache.has(replayCacheKey)) {
     return res.status(401).json({ error: 'This verification code has already been used. Please wait for a new token.' });
   }
 
-  // Cryptographically evaluate the math using your speakeasy utility
   const isValid = verifyTOTP(otp, activeSecret);
 
   if (!isValid) {
@@ -170,7 +167,6 @@ router.post('/verify-otp', async (req, res) => {
     if (req.session.otpAttempts >= 3) {
       delete req.session.pendingUser;
       delete req.session.otpAttempts;
-
       return req.session.save((err) => {
         if (err) return res.status(500).json({ error: 'Session save error' });
         res.status(401).json({ error: 'Too many failed attempts. Please sign in again.' });
@@ -183,36 +179,33 @@ router.post('/verify-otp', async (req, res) => {
     });
   }
 
-  // Token is valid! Mark it as spent for the remainder of its 30-second window
   usedTokensCache.add(replayCacheKey);
 
-  // 3. Handshake Success: Finalize the state configurations
   const user = req.session.pendingUser;
   const userId = user.id;
 
   try {
-    // SECURE WRITEBACK: Commit the key encrypted to the DB row ONLY after token roundtrip verification succeeds
     if (user.isSetupPending) {
       const encryptedSecret = encryptSecret(activeSecret);
+      const targetTable = user.role === 'admin' ? 'admins' : 'users';
+      const targetIdColumn = user.role === 'admin' ? 'admin_id' : 'user_id';
+
       await pool.execute(
-        'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
+        `UPDATE ${targetTable} SET otp_secret = ?, otp_enabled = 1 WHERE ${targetIdColumn} = ?`,
         [encryptedSecret, userId]
       );
-      await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
+      await writeLog({ userId, userRole: user.role, action: '2FA_SETUP', status: 'success' });
     }
 
-    delete user.otp_secret; // Data Minimization: Wipe memory references before serialization
+    delete user.encrypted_otp_secret; // Data Minimization removal before cookie compilation
     delete user.isSetupPending;
 
     req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
 
       req.session.user = user;
-
-      // Forces the server to finish saving the session memory before replying
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-
         await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success' });
         res.json({ user: req.session.user });
       });
@@ -223,7 +216,6 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// Admin login.
 router.post(
   '/admin/login',
   loginLimiter,
@@ -237,7 +229,6 @@ router.post(
   (req, res) => handleLogin(req, res, 'admin')
 );
 
-// Logout for both roles.
 router.post('/logout', requireAuth(), (req, res) => {
   const { id, role } = req.session.user;
   req.session.destroy(async (err) => {
@@ -251,7 +242,6 @@ router.post('/logout', requireAuth(), (req, res) => {
   });
 });
 
-// Core internal identity evaluator logic handler
 async function handleLogin(req, res, role) {
   const { username, password } = req.body;
   const table = role === 'admin' ? 'admins' : 'users';
@@ -307,43 +297,38 @@ async function handleLogin(req, res, role) {
       );
     }
 
-    // --- 2FA IMPLEMENTATION CONTROL ENGINE ---
-    if (role === 'user') {
-      const hasUserDisabledMFA = account.otp_enabled === 0 && account.otp_secret === null;
+    const hasDisabledMFA = role === 'user' && account.otp_enabled === 0 && account.otp_secret === null;
 
-      if (!hasUserDisabledMFA) {
-        const isSetupPending = account.otp_secret === null;
-        const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
+    if (!hasDisabledMFA) {
+      const isSetupPending = account.otp_secret === null;
 
-        req.session.pendingUser = {
-          id: String(account[idCol]),
-          username: account.username,
-          first_name: account.first_name,
-          last_name: account.last_name,
-          email: account.email,
-          role: role,
-          account_number: account.account_number || null,
-          otp_secret: plainSecret,
+      req.session.pendingUser = {
+        id: String(account[idCol]),
+        username: account.username,
+        first_name: account.first_name || 'Admin', 
+        last_name: account.last_name || 'User',
+        email: account.email || '',
+        role: account.role || role,
+        account_number: account.account_number || null,
+        encrypted_otp_secret: account.otp_secret,
+        isSetupPending: isSetupPending
+      };
+      
+      req.session.otpAttempts = 0;
+
+      return req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+        
+        return res.status(202).json({ 
+          message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code', 
+          requires2FA: true,
           isSetupPending: isSetupPending
-        };
-
-        req.session.otpAttempts = 0;
-
-        return req.session.save((err) => {
-          if (err) {
-            console.error('Session save error:', err);
-            return res.status(500).json({ error: 'Internal server error' });
-          }
-
-          return res.status(202).json({
-            message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
-            requires2FA: true,
-            isSetupPending: isSetupPending
-          });
         });
-      }
+      });
     }
-    // ------------------------------------------
 
     req.session.regenerate((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
@@ -359,7 +344,6 @@ async function handleLogin(req, res, role) {
 
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-
         writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success' });
         res.json({ user: req.session.user });
       });
@@ -463,7 +447,6 @@ router.post("/email-verify-otp", (req, res) => {
   }
 });
 
-// PUBLIC HANDSHAKE 2FA ONBOARDING RESOURCE GENERATOR
 router.post('/generate-onboarding-2fa', async (req, res) => {
   try {
     if (!req.session.pendingUser || !req.session.pendingUser.isSetupPending) {

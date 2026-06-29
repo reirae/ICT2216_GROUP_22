@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { PATTERNS } from '../utils/format';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Lock } from 'lucide-react';
 import PageLoader from '../components/PageLoader';
 
 interface ProfileData {
@@ -39,9 +39,34 @@ export default function Profile() {
   const [pwOk, setPwOk] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // --- Dynamic Profile Edit Management States ---
+  const [isEditing, setIsEditing] = useState(false);
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [editForm, setEditForm] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone_number: '',
+    token: ''
+  });
+
   useEffect(() => {
     api.get<ProfileData>('/user/profile').then(setData).catch((e) => setError(e.message));
   }, []);
+
+  // Sync profile values into editing form state once loaded from API
+  useEffect(() => {
+    if (data?.user) {
+      setEditForm({
+        first_name: data.user.first_name,
+        last_name: data.user.last_name,
+        email: data.user.email,
+        phone_number: data.user.phone_number || '',
+        token: ''
+      });
+    }
+  }, [data]);
 
   const handleSetup2FA = async () => {
     try {
@@ -75,7 +100,7 @@ export default function Profile() {
       setVerificationCode('');
       
       if (data?.user) {
-        setData({ ...data, user: { ...data.user, status: 'active_mfa', hasMfaEnabled: 1 } });
+        setData({ ...data, user: { ...data.user, hasMfaEnabled: 1 } });
       }
     } catch (e: any) {
       setMfaError(e.response?.data?.error || e.message || 'Invalid activation token code. Please retry.');
@@ -122,6 +147,39 @@ export default function Profile() {
     }
   };
 
+  // --- Live End-to-End Profile Submission API Call ---
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+
+    // Local structural verification before network dispatch
+    if (!PATTERNS.name.test(editForm.first_name) || !PATTERNS.name.test(editForm.last_name)) {
+      return setProfileError('Names must start with letters and contain no special characters.');
+    }
+    if (!PATTERNS.email.test(editForm.email)) {
+      return setProfileError('Invalid email format structure.');
+    }
+    if (editForm.phone_number && editForm.phone_number.length !== 8) {
+      return setProfileError('Phone number must be exactly 8 digits long.');
+    }
+
+    setBusy(true);
+    try {
+      const response = await api.put<{ message: string }>('/user/profile', editForm);
+      setProfileSuccess(response.message);
+      setIsEditing(false);
+
+      // Refresh master view context safely from source row variables
+      const updatedProfile = await api.get<ProfileData>('/user/profile');
+      setData(updatedProfile);
+    } catch (err: any) {
+      setProfileError(err.response?.data?.error || err.message || 'Validation gate failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (error) return <p className="text-red-600">{error}</p>;
   if (!data) return <PageLoader />;
   const u = data.user;
@@ -131,22 +189,160 @@ export default function Profile() {
       <h1 className="text-2xl sm:text-3xl text-gray-800 mb-4 sm:mb-6">Profile Settings</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+        
+        {/* Dynamic Profile Details Container Card */}
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6 relative">
+          {/* Pencil Edit Icon Toggle Button Controls */}
+          <button
+            type="button"
+            title={isEditing ? "Cancel editing" : "Edit profile details"}
+            onClick={() => {
+              setIsEditing(!isEditing);
+              setProfileError('');
+              setProfileSuccess('');
+              if (data?.user) {
+                setEditForm({
+                  first_name: data.user.first_name,
+                  last_name: data.user.last_name,
+                  email: data.user.email,
+                  phone_number: data.user.phone_number || '',
+                  token: ''
+                });
+              }
+            }}
+            className="absolute top-4 right-4 p-2 text-gray-500 hover:text-blue-600 rounded-full hover:bg-gray-100 transition-colors"
+          >
+            {isEditing ? (
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-200 rounded text-gray-700">Cancel</span>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21H3v-3.5l12.828-12.828z" />
+              </svg>
+            )}
+          </button>
+
           <h3 className="text-lg sm:text-xl text-gray-800 mb-4">Profile Details</h3>
-          <div className="space-y-4">
-            <Detail label="Full Name" value={`${u.first_name} ${u.last_name}`} />
-            <Detail label="Username" value={u.username} />
-            <Detail label="Email" value={u.email} />
-            <Detail label="Phone" value={u.phone_number || '—'} />
-            <Detail label="Account Number" value={u.account_number} />
-            <div>
-              <p className="text-gray-600 text-sm mb-1">Account Status</p>
-              <span className={`inline-flex px-3 py-1 rounded-full text-sm ${
-                (u.status === 'active' || u.status === 'active_mfa') ? 'bg-green-100 text-green-700' :
-                u.status === 'suspended' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
-              }`}>{u.status}</span>
+          
+          {profileSuccess && <div className="bg-green-50 border border-green-300 text-green-700 px-4 py-2 rounded-lg text-xs mb-3">{profileSuccess}</div>}
+          {profileError && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-2 rounded-lg text-xs mb-3">{profileError}</div>}
+
+          {!isEditing ? (
+            /* STATIC DISPLAY VIEW MODE */
+            <div className="space-y-4">
+              <Detail label="Full Name" value={`${u.first_name} ${u.last_name}`} />
+              <Detail label="Username" value={u.username} />
+              <Detail label="Email" value={u.email} />
+              <Detail label="Phone" value={u.phone_number || '—'} />
+              <Detail label="Account Number" value={u.account_number} />
+              <div>
+                <p className="text-gray-600 text-sm mb-1">Account Status</p>
+                <span className={`inline-flex px-3 py-1 rounded-full text-sm ${
+                  (u.status === 'active' || u.status === 'active_mfa') ? 'bg-green-100 text-green-700' :
+                  u.status === 'suspended' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                }`}>{u.status}</span>
+              </div>
             </div>
-          </div>
+          ) : u.hasMfaEnabled === 0 ? (
+            /* CRITICAL ENFORCEMENT: Block modification view interface if 2FA has been disabled */
+            <div className="flex flex-col items-center justify-center text-center p-6 bg-gray-50 border border-dashed border-gray-300 rounded-xl animate-fade-in space-y-3">
+              <div className="p-3 bg-amber-50 rounded-full border border-amber-200 text-amber-600">
+                <Lock className="w-6 h-6" />
+              </div>
+              <h4 className="text-sm font-bold text-gray-800">Two-Factor Authentication Mandated</h4>
+              <p className="text-xs text-gray-500 max-w-[280px]">
+                To safeguard banking records, credentials can only be edited while 2FA device link tracking protection is active. Please turn on 2FA down below.
+              </p>
+              <button 
+                type="button" 
+                onClick={() => setIsEditing(false)}
+                className="text-xs font-semibold text-blue-600 hover:underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : (
+            /* SECURE SUBMISSION FIELD MODE */
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">First Name</label>
+                  <input
+                    type="text"
+                    maxLength={50}
+                    value={editForm.first_name}
+                    onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 text-gray-800 focus:outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Last Name</label>
+                  <input
+                    type="text"
+                    maxLength={50}
+                    value={editForm.last_name}
+                    onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 text-gray-800 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Username (Immutable)</label>
+                <input type="text" value={u.username} disabled className="w-full px-3 py-2 text-sm border rounded-lg bg-gray-100 text-gray-400 cursor-not-allowed" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  maxLength={100}
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 text-gray-800 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Phone Number</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={8} // Hard-stops input length right at 8 numbers max
+                  value={editForm.phone_number}
+                  // Enforces digit-only matching natively as they type
+                  onChange={(e) => setEditForm({ ...editForm, phone_number: e.target.value.replace(/\D/g, '') })}
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 text-gray-800 focus:outline-none"
+                  placeholder="e.g. 9123 4567"
+                />
+              </div>
+
+              <div className="bg-blue-50/60 p-3 rounded-lg border border-blue-200">
+                <label className="block text-xs font-bold text-blue-800 mb-1">
+                  Enter Authenticator 6-Digit Code to Authorize:
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={editForm.token}
+                  onChange={(e) => setEditForm({ ...editForm, token: e.target.value.replace(/\D/g, '') })}
+                  className="w-full text-center tracking-widest font-mono font-bold text-lg p-2 border rounded-md focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full mt-2 bg-blue-600 text-white text-sm py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-60"
+              >
+                {busy ? 'Saving changes...' : 'Save Profile Changes'}
+              </button>
+            </form>
+          )}
         </div>
 
         <div className="bg-white rounded-lg shadow p-4 sm:p-6">
