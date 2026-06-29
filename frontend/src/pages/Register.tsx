@@ -56,6 +56,8 @@ export default function Register() {
       return setError('PIN must be exactly 6 digits.');
     if (form.pin !== form.confirmPin)
       return setError('PINs do not match.');
+    if (!/@(gmail|googlemail)\.com$/i.test(form.email.trim()))
+      return setError('Please use a Gmail address (@gmail.com) to register.');
 
     setBusy(true);
     try {

@@ -89,10 +89,14 @@ router.post(
     body('password').matches(PATTERNS.pin).withMessage('PIN must be exactly 6 digits'),
     body('first_name').matches(PATTERNS.name).withMessage('Invalid first name'),
     body('last_name').matches(PATTERNS.name).withMessage('Invalid last name'),
-    body('email').matches(PATTERNS.email).withMessage('Invalid email'),
+    body('email').matches(PATTERNS.email).withMessage('Invalid email')
+      .bail()
+      .matches(/@(gmail|googlemail)\.com$/i).withMessage('Please use a Gmail address (@gmail.com) to register'),
     body('phone_number').matches(PATTERNS.phoneSG).withMessage('Invalid phone number'),
+    body('captcha').isString().isLength({ min: 20, max: 2000 }),
   ],
   handleValidation,
+  verifyCaptcha,
   async (req, res) => {
     const { username, email } = req.body;
     try {
