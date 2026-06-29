@@ -8,6 +8,7 @@ const { loginLimiter } = require('../middleware/rateLimiter');
 const { handleValidation, verifyCaptcha, PATTERNS } = require('../middleware/validation');
 const { requireAuth } = require('../middleware/auth');
 const { sendOtpEmail, verifyOtp } = require("../utils/otp");
+const { sendPasswordChangedEmail } = require("../utils/notifications");
 const { verifyTOTP } = require('../utils/totp');
 
 const router = express.Router();
@@ -464,6 +465,13 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'PIN must be exactly 6 digits.' });
     }
 
+    // Look up username for the confirmation email
+    const [rows] = await pool.execute(
+      'SELECT username FROM users WHERE email = ? LIMIT 1',
+      [email]
+    );
+    const username = rows[0]?.username;
+
     const password_hash = await bcrypt.hash(newPassword, 12);
     await pool.execute(
       'UPDATE users SET password_hash = ? WHERE email = ?',
@@ -473,6 +481,14 @@ router.post('/reset-password', async (req, res) => {
     // Clear reset session flags
     delete req.session.otpVerified;
     delete req.session.resetEmail;
+
+    // Notify the user their PIN changed. This is best-effort: a mail
+    // failure here must not undo or block the reset that already succeeded.
+    try {
+      await sendPasswordChangedEmail(email, username);
+    } catch (mailErr) {
+      console.error('[reset-password] failed to send confirmation email:', mailErr);
+    }
 
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
