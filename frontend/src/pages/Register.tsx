@@ -15,12 +15,13 @@ export default function Register() {
     email: '',
     phone_number: '',
     username: '',
-    pin: '',
-    confirmPin: '',
+    password: '',
+    confirmPassword: '',
   });
   const [otp, setOtp] = useState('');
   const [cooldown, setCooldown] = useState(0);
-  const [showPin, setShowPin] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -52,10 +53,10 @@ export default function Register() {
       return setError('Phone number must be exactly 8 digits.');
     if (!PATTERNS.username.test(form.username))
       return setError('Username must start with a letter, 3-50 characters.');
-    if (!PATTERNS.pin.test(form.pin))
-      return setError('PIN must be exactly 6 digits.');
-    if (form.pin !== form.confirmPin)
-      return setError('PINs do not match.');
+    if (!PATTERNS.password.test(form.password))
+      return setError('Password too weak. Use at least 8 characters with uppercase, lowercase, number, and symbol.');
+    if (form.password !== form.confirmPassword)
+      return setError('Passwords do not match.');
     if (!/@(gmail|googlemail)\.com$/i.test(form.email.trim()))
       return setError('Please use a Gmail address (@gmail.com) to register.');
 
@@ -63,7 +64,7 @@ export default function Register() {
     try {
       await api.post('/auth/register-send-otp', {
         username: form.username,
-        password: form.pin,
+        password: form.password,
         first_name: form.first_name,
         last_name: form.last_name,
         email: form.email,
@@ -109,7 +110,7 @@ export default function Register() {
     try {
       await api.post('/auth/register-send-otp', {
         username: form.username,
-        password: form.pin,
+        password: form.password,
         first_name: form.first_name,
         last_name: form.last_name,
         email: form.email,
@@ -123,31 +124,6 @@ export default function Register() {
       setBusy(false);
     }
   };
-
-  const pinField = (label: string, k: 'pin' | 'confirmPin', placeholder: string) => (
-    <div>
-      <label className="block text-sm sm:text-base text-gray-700 mb-2">{label}</label>
-      <div className="relative">
-        <input
-          type={showPin ? 'text' : 'password'}
-          inputMode="numeric"
-          autoComplete="off"
-          value={form[k]}
-          onChange={updateDigits(k)}
-          className="w-full px-4 py-3 pr-12 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder={placeholder}
-          maxLength={6}
-        />
-        <button
-          type="button"
-          onClick={() => setShowPin(!showPin)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-        >
-          {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-        </button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -203,8 +179,48 @@ export default function Register() {
                     className="w-full px-4 py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Choose username" maxLength={50} />
                 </div>
-                {pinField('PIN', 'pin', '6-digit PIN')}
-                {pinField('Confirm PIN', 'confirmPin', 'Re-enter PIN')}
+                <div>
+                  <label className="block text-sm sm:text-base text-gray-700 mb-2">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={form['password']}
+                      onChange={update('password')}
+                      className="w-full px-4 py-3 pr-12 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder={'Enter password'}
+                      maxLength={128}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm sm:text-base text-gray-700 mb-2">Confirm Password</label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={form['confirmPassword']}
+                      onChange={update('confirmPassword')}
+                      className="w-full px-4 py-3 pr-12 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder={'Re-enter password'}
+                      maxLength={128}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
 
                 {error && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
 

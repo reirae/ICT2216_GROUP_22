@@ -87,7 +87,7 @@ router.post(
   '/register-send-otp',
   [
     body('username').matches(PATTERNS.username).withMessage('Invalid username'),
-    body('password').matches(PATTERNS.pin).withMessage('PIN must be exactly 6 digits'),
+    body('password').matches(PATTERNS.password).withMessage('Password too weak'),
     body('first_name').matches(PATTERNS.name).withMessage('Invalid first name'),
     body('last_name').matches(PATTERNS.name).withMessage('Invalid last name'),
     body('email').matches(PATTERNS.email).withMessage('Invalid email')
@@ -459,8 +459,8 @@ router.post('/reset-password', async (req, res) => {
     }
 
     // Validate PIN: exactly 6 digits
-    if (!newPassword || !/^\d{6}$/.test(newPassword)) {
-      return res.status(400).json({ error: 'PIN must be exactly 6 digits.' });
+    if (!newPassword || !PATTERNS.password.test(newPassword)) {
+      return res.status(400).json({ error: 'Password does not meet requirements' });
     }
 
     // Look up username for the confirmation email

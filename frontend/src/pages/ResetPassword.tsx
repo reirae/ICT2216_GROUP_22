@@ -145,12 +145,12 @@ export default function ResetPassword() {
     e.preventDefault();
     setError('');
 
-    if (!/^\d{6}$/.test(newPassword)) {
-      setError('PIN must be exactly 6 digits.');
+    if (!PATTERNS.password.test(newPassword)) {
+      setError('Password too weak. Use at least 8 characters with uppercase, lowercase, number, and symbol.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError('PINs do not match.');
+      setError('Passwords do not match.');
       return;
     }
 
@@ -159,7 +159,7 @@ export default function ResetPassword() {
       await api.post('/auth/reset-password', { email, newPassword });
       setStage('success');
     } catch (err: any) {
-      setError(err.message || 'Failed to reset PIN. Please try again.');
+      setError(err.message || 'Failed to reset password. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -237,7 +237,7 @@ export default function ResetPassword() {
               </button>
 
               <div className="text-center text-sm text-gray-600">
-                Remember your PIN?{' '}
+                Remember your password?{' '}
                 <Link to="/login" className="text-blue-600 hover:underline">
                   Sign in
                 </Link>
@@ -316,43 +316,58 @@ export default function ResetPassword() {
           )}
 
           {/* STAGE 3 — New Password */}
-          {/* STAGE 3 — New PIN */}
           {stage === 'newPassword' && (
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
               <p className="text-sm text-gray-600 text-center">
-                Hi <span className="font-medium text-gray-800">{username}</span>, set a new 6-digit PIN for your account.
+                Hi <span className="font-medium text-gray-800">{username}</span>, choose a strong new password for your account.
               </p>
 
               <div>
-                <label className="block text-sm sm:text-base text-gray-700 mb-2 font-medium text-center">
-                  New PIN
+                <label className="block text-sm sm:text-base text-gray-700 mb-2">
+                  New Password
                 </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value.replace(/\D/g, ''))}
-                  className="w-full text-center tracking-widest text-2xl font-bold px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="······"
-                />
+                <div className="relative">
+                  <input
+                    type={showPw ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter new password"
+                    maxLength={128}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPw(!showPw)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                  >
+                    {showPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm sm:text-base text-gray-700 mb-2 font-medium text-center">
-                  Confirm New PIN
+                <label className="block text-sm sm:text-base text-gray-700 mb-2">
+                  Confirm New Password
                 </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value.replace(/\D/g, ''))}
-                  className="w-full text-center tracking-widest text-2xl font-bold px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="······"
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirm ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Confirm new password"
+                    maxLength={128}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                  >
+                    {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
 
               {error && (
@@ -363,10 +378,10 @@ export default function ResetPassword() {
 
               <button
                 type="submit"
-                disabled={busy || newPassword.length !== 6 || confirmPassword.length !== 6}
+                disabled={busy}
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium"
               >
-                {busy ? 'Saving…' : 'Reset PIN'}
+                {busy ? 'Saving…' : 'Reset Password'}
               </button>
             </form>
           )}
@@ -378,7 +393,7 @@ export default function ResetPassword() {
                 <CheckCircle className="w-14 h-14" />
               </div>
               <p className="text-gray-700 text-sm">
-                Your PIN has been reset successfully. You can now sign in with your new PIN.
+                Your password has been reset successfully. You can now sign in with your new password.
               </p>
               <button
                 onClick={() => nav('/login')}

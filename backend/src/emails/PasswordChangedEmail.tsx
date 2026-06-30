@@ -18,12 +18,12 @@ export default function PasswordChangedEmail({ username, changedAt }: PasswordCh
     <Html lang="en">
       <Container style={container}>
         <Section style={section}>
-          <Heading style={heading}>Your PIN was changed</Heading>
+          <Heading style={heading}>Your password was changed</Heading>
           {username && (
             <Text style={text}>Hi <strong>{username}</strong>,</Text>
           )}
           <Text style={text}>
-            This is a confirmation that the PIN for your account was just
+            This is a confirmation that the password for your account was just
             changed{changedAt ? <> on <strong>{changedAt}</strong></> : null}.
           </Text>
           <Section style={noticeBox}>
