@@ -97,7 +97,6 @@ router.post(
     body('captcha').isString().isLength({ min: 20, max: 2000 }),
   ],
   handleValidation,
-  verifyCaptcha,
   async (req, res) => {
     const { username, email } = req.body;
     try {
