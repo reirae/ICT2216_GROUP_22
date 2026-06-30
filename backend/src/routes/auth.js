@@ -94,7 +94,6 @@ router.post(
       .bail()
       .matches(/@(gmail|googlemail)\.com$/i).withMessage('Please use a Gmail address (@gmail.com) to register'),
     body('phone_number').matches(PATTERNS.phoneSG).withMessage('Invalid phone number'),
-    body('captcha').isString().isLength({ min: 20, max: 2000 }),
   ],
   handleValidation,
   async (req, res) => {
