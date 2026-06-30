@@ -160,7 +160,7 @@ export default function AdminLogin() {
                 </div>
 
                 <div className="text-gray-900 bg-gray-50 rounded-lg p-3">
-                  <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
+                  <Turnstile ref={turnstileRef} siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')}/>
                 </div>
               </>
             ) : (
