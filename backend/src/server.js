@@ -46,8 +46,18 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging',
       maxAge: Number(process.env.SESSION_MAX_AGE_MS || 15 * 60 * 1000),
+
+      // Only restrict path and domain if explicitly deployed to production/staging
+      ...(process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging' 
+        ? {
+            path: '/api',
+            domain: process.env.COOKIE_DOMAIN,
+          }
+        : {} // Keeps local development working flawlessly on localhost/127.0.0.1
+      ),
+      
     },
   })
 );
