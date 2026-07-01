@@ -95,8 +95,7 @@ router.post(
   }
 );
 
-// Update user details/status (Business Admin)
-// FIXED: Removed 'admin' string restriction constraint from requireAuth
+// Update user profile details only — status changes use PUT /users/:id/status
 router.put(
   '/users/:id',
   requireAuth(),
@@ -106,52 +105,82 @@ router.put(
     body('last_name').optional().matches(PATTERNS.name),
     body('email').optional().matches(PATTERNS.email),
     body('phone_number').optional({ checkFalsy: true }).matches(PATTERNS.phone),
-    body('status').optional().isIn(['active', 'suspended', 'deactivated']),
   ],
   handleValidation,
   async (req, res) => {
     const idStr = req.params.id;
-    
+
     if (!/^\d+$/.test(idStr)) {
       return res.status(400).json({ error: 'Invalid user ID format.' });
     }
 
-    const allowed = ['first_name', 'last_name', 'email', 'phone_number', 'status'];
+    // Reject any attempt to change status through this endpoint
+    if (req.body.status !== undefined) {
+      return res.status(400).json({ error: 'Status changes must use PUT /admin/users/:id/status.' });
+    }
+
+    // Confirm the user exists before building the update
+    const [[target]] = await pool.execute('SELECT user_id FROM users WHERE user_id = ?', [idStr]);
+    if (!target) return res.status(404).json({ error: `User with ID ${idStr} not found.` });
+
+    const allowed = ['first_name', 'last_name', 'email', 'phone_number'];
     const fields = [];
     const values = [];
-    
+
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         fields.push(`${key} = ?`);
         values.push(req.body[key]);
       }
     }
-    
-    if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
-    
+
+    if (!fields.length) return res.status(400).json({ error: 'No fields to update.' });
+
     values.push(idStr);
 
     try {
       const query = `UPDATE users SET ${fields.join(', ')} WHERE user_id = ?`;
-      const [result] = await pool.execute(query, values);
-      
-      if (result.affectedRows === 0) {
-        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE_FAIL', status: 'failure' });
-        return res.status(404).json({ error: `User with ID ${idStr} not found.` });
-      }
+      await pool.execute(query, values);
 
-      await writeLog({
-        userId: req.session.user.id,
-        userRole: 'admin',
-        action: req.body.status ? 'USER_STATUS_CHANGE' : 'USER_UPDATE',
-        status: 'success',
-      });
-      
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'success' });
       return res.json({ message: 'User updated successfully' });
     } catch (err) {
       console.error('[admin-users-update]', err);
       await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'failure' });
       res.status(500).json({ error: 'Failed to update user' });
+    }
+  }
+);
+
+// Update user status only (Business Admin) — separated from profile edits for auditability
+router.put(
+  '/users/:id/status',
+  requireAuth(),
+  requireAdminRole(['business_admin']),
+  [body('status').isIn(['active', 'suspended', 'deactivated'])],
+  handleValidation,
+  async (req, res) => {
+    const idStr = req.params.id;
+
+    if (!/^\d+$/.test(idStr)) {
+      return res.status(400).json({ error: 'Invalid user ID format.' });
+    }
+
+    const { status } = req.body;
+
+    try {
+      // Confirm the user exists and fetch their current status
+      const [[target]] = await pool.execute('SELECT user_id, status FROM users WHERE user_id = ?', [idStr]);
+      if (!target) return res.status(404).json({ error: `User with ID ${idStr} not found.` });
+
+      await pool.execute('UPDATE users SET status = ? WHERE user_id = ?', [status, idStr]);
+
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'success' });
+      return res.json({ message: 'User status updated successfully' });
+    } catch (err) {
+      console.error('[admin-users-status]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'failure' });
+      res.status(500).json({ error: 'Failed to update user status' });
     }
   }
 );

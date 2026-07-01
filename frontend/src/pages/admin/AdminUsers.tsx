@@ -53,7 +53,7 @@ export default function AdminUsers() {
   }, [users, search, statusFilter]);
 
   const setStatus = async (id: number, status: AdminUser['status']) => {
-    try { await api.put(`/admin/users/${id}`, { status }); await load(); }
+    try { await api.put(`/admin/users/${id}/status`, { status }); await load(); }
     catch (e: any) { setError(e.message); }
   };
 
