@@ -42,11 +42,11 @@ router.get('/users', requireAuth(), requireAdminRole(['business_admin']), async 
          FROM users
          ORDER BY user_id ASC`
     );
-    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'success' });
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'success', ipAddress: req.ip });
     res.json({ users: rows });
   } catch (err) {
     console.error('[admin-users]', err);
-    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'failure' });
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'Failed to load users' });
   }
 });
@@ -74,7 +74,7 @@ router.post(
         [username, email, phone_number || null]
       );
       if (dupes.length) {
-        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure' });
+        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure', ipAddress: req.ip });
         return res.status(409).json({ error: 'Username, email, or phone number already exists' });
       }
 
@@ -85,11 +85,11 @@ router.post(
          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active')`,
         [username, hash, first_name, last_name, email, phone_number || null, accountNumber]
       );
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'success' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'success', ipAddress: req.ip });
       res.status(201).json({ message: 'User created' });
     } catch (err) {
       console.error('[admin-users-create]', err);
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure', ipAddress: req.ip });
       res.status(500).json({ error: 'Failed to create user' });
     }
   }
@@ -142,11 +142,11 @@ router.put(
       const query = `UPDATE users SET ${fields.join(', ')} WHERE user_id = ?`;
       await pool.execute(query, values);
 
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'success' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'success', ipAddress: req.ip });
       return res.json({ message: 'User updated successfully' });
     } catch (err) {
       console.error('[admin-users-update]', err);
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'failure' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'failure', ipAddress: req.ip });
       res.status(500).json({ error: 'Failed to update user' });
     }
   }
@@ -175,11 +175,11 @@ router.put(
 
       await pool.execute('UPDATE users SET status = ? WHERE user_id = ?', [status, idStr]);
 
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'success' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'success', ipAddress: req.ip });
       return res.json({ message: 'User status updated successfully' });
     } catch (err) {
       console.error('[admin-users-status]', err);
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'failure' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'failure', ipAddress: req.ip });
       res.status(500).json({ error: 'Failed to update user status' });
     }
   }
@@ -202,11 +202,11 @@ router.get('/transactions', requireAuth(), requireAdminRole(['business_admin']),
          LEFT JOIN users r ON r.user_id = t.recipient_id
         ORDER BY t.created_at DESC`
     );
-    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'success' });
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'success', ipAddress: req.ip });
     res.json({ transactions: rows });
   } catch (err) {
     console.error('[admin-transactions]', err);
-    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'failure' });
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'Failed to load transactions' });
   }
 });
@@ -226,11 +226,11 @@ router.get('/logs', requireAuth(), requireAdminRole(['it_admin']), async (req, r
          ORDER BY created_at DESC
          LIMIT 1000`
     );
-    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'success' });
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'success', ipAddress: req.ip });
     res.json({ logs: rows });
   } catch (err) {
     console.error('[admin-logs]', err);
-    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'failure' });
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'Failed to load logs' });
   }
 });
@@ -254,7 +254,7 @@ router.post(
     try {
       const [dupes] = await pool.execute('SELECT admin_id FROM admins WHERE username = ? LIMIT 1', [username]);
       if (dupes.length) {
-        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure' });
+        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure', ipAddress: req.ip });
         return res.status(409).json({ error: 'Admin username already exists' });
       }
 
@@ -266,11 +266,11 @@ router.post(
         [username, hash, first_name, last_name, email, phone_number]
       );
 
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'success' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'success', ipAddress: req.ip });
       res.status(201).json({ message: 'Business Admin account successfully created' });
     } catch (err) {
       console.error('[admin-create-business]', err);
-      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure', ipAddress: req.ip });
       res.status(500).json({ error: 'Failed to create business admin' });
     }
   }
@@ -289,7 +289,8 @@ router.get('/list-admins', requireAuth(), requireAdminRole(['it_admin']), async 
       userId: req.session.user.id, 
       userRole: 'admin', 
       action: 'VIEW_ADMIN_DIRECTORY', 
-      status: 'success' 
+      status: 'success', 
+      ipAddress: req.ip 
     });
     
     res.json({ admins: rows });
@@ -300,7 +301,8 @@ router.get('/list-admins', requireAuth(), requireAdminRole(['it_admin']), async 
       userId: req.session.user.id, 
       userRole: 'admin', 
       action: 'VIEW_ADMIN_DIRECTORY', 
-      status: 'failure' 
+      status: 'failure', 
+      ipAddress: req.ip 
     });
     
     res.status(500).json({ error: 'Failed to load administrative directory' });

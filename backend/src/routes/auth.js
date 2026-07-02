@@ -198,12 +198,12 @@ router.post('/register', async (req, res) => {
 
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
-      writeLog({ userRole: 'user', action: 'REGISTER', status: 'success' });
+      writeLog({ userRole: 'user', action: 'REGISTER', status: 'success', ipAddress: req.ip});
       res.status(201).json({ message: 'Account created. You can now sign in.' });
     });
   } catch (err) {
     console.error('[register]', err);
-    await writeLog({ userRole: 'user', action: 'REGISTER', status: 'failure' });
+    await writeLog({ userRole: 'user', action: 'REGISTER', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'Registration failed' });
   }
 });
@@ -225,7 +225,7 @@ router.post('/verify-otp', async (req, res) => {
   const { otp, tempSecret } = req.body;
 
   if (!req.session.pendingUser) {
-    await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
+    await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
     return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
 
@@ -247,7 +247,7 @@ router.post('/verify-otp', async (req, res) => {
 
   if (!isValid) {
     req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
-    await writeLog({ userId: req.session.pendingUser?.id || null, userRole: 'user', action: 'LOGIN_2FA', status: 'failure' });
+    await writeLog({ userId: req.session.pendingUser?.id || null, userRole: 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
 
     if (req.session.otpAttempts >= 3) {
       delete req.session.pendingUser;
@@ -279,7 +279,7 @@ router.post('/verify-otp', async (req, res) => {
         `UPDATE ${targetTable} SET otp_secret = ?, otp_enabled = 1 WHERE ${targetIdColumn} = ?`,
         [encryptedSecret, userId]
       );
-      await writeLog({ userId, userRole: user.role, action: '2FA_SETUP', status: 'success' });
+      await writeLog({ userId, userRole: user.role, action: '2FA_SETUP', status: 'success', ipAddress: req.ip });
     }
 
     delete user.encrypted_otp_secret; // Data Minimization removal before cookie compilation
@@ -291,7 +291,7 @@ router.post('/verify-otp', async (req, res) => {
       req.session.user = user;
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-        await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success' });
+        await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success', ipAddress: req.ip });
         res.json({ user: req.session.user });
       });
     });
@@ -318,11 +318,11 @@ router.post('/logout', requireAuth(), (req, res) => {
   const { id, role } = req.session.user;
   req.session.destroy(async (err) => {
     if (err) {
-      await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'failure' });
+      await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'failure', ipAddress: req.ip });
       return res.status(500).json({ error: 'Logout failed' });
     }
     res.clearCookie(process.env.SESSION_COOKIE_NAME || 'securebank.sid');
-    await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'success' });
+    await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'success', ipAddress: req.ip });
     res.json({ message: 'Logged out' });
   });
 });
@@ -340,17 +340,17 @@ async function handleLogin(req, res, role) {
     const account = rows[0];
 
     if (!account) {
-      await writeLog({ userRole: role, action: 'LOGIN', status: 'failure' });
+      await writeLog({ userRole: role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (role === 'user') {
       if (account.locked_until && new Date(account.locked_until) > new Date()) {
-        await writeLog({ userId: account[idCol], userRole: 'user', action: 'LOGIN', status: 'failure' });
+        await writeLog({ userId: account[idCol], userRole: 'user', action: 'LOGIN', status: 'failure', ipAddress: req.ip });
         return res.status(423).json({ error: 'Account is temporarily locked. Try again later.' });
       }
       if (account.status !== 'active') {
-        await writeLog({ userId: account[idCol], userRole: 'user', action: 'LOGIN', status: 'failure' });
+        await writeLog({ userId: account[idCol], userRole: 'user', action: 'LOGIN', status: 'failure', ipAddress: req.ip });
         return res.status(403).json({ error: 'Account is not active.' });
       }
     }
@@ -371,7 +371,7 @@ async function handleLogin(req, res, role) {
           );
         }
       }
-      await writeLog({ userId: account[idCol], userRole: role, action: 'LOGIN', status: 'failure' });
+      await writeLog({ userId: account[idCol], userRole: role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -429,13 +429,13 @@ async function handleLogin(req, res, role) {
 
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-        writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success' });
+        writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
         res.json({ user: req.session.user });
       });
     });
   } catch (err) {
     console.error('[login]', err);
-    await writeLog({ userRole: role, action: 'LOGIN', status: 'failure' });
+    await writeLog({ userRole: role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'Login failed' });
   }
 }
@@ -490,12 +490,12 @@ router.post('/reset-password', async (req, res) => {
 
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
-      writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'success' });
+      writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'success', ipAddress: req.ip });
       res.json({ message: 'PIN reset successfully' });
     });
   } catch (err) {
     console.error('[reset-password]', err);
-    await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'failure' });
+    await writeLog({ userRole: 'user', action: 'RESET_PASSWORD', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'PIN reset failed' });
   }
 });
