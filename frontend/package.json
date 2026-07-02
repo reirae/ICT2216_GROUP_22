@@ -14,7 +14,7 @@
     "@marsidev/react-turnstile": "^1.5.3",
     "@react-email/components": "^1.0.12",
     "lucide-react": "^0.453.0",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-email": "^6.1.5",
