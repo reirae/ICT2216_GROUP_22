@@ -1,10 +1,16 @@
 const { pool } = require('../config/database');
 
-async function writeLog({ userId = null, userRole, action, status = 'success' }) {
+function normalizeIp(ip) {
+  if (ip === '::1') return '127.0.0.1';
+  if (ip && ip.startsWith('::ffff:')) return ip.replace('::ffff:', '');
+  return ip;
+}
+
+async function writeLog({ userId = null, userRole, action, status = 'success', ipAddress = null }) {
   try {
     await pool.execute(
-      'INSERT INTO logs (user_id, user_role, action, status) VALUES (?, ?, ?, ?)',
-      [userId, userRole, action, status]
+      'INSERT INTO logs (user_id, user_role, action, status, ip_address) VALUES (?, ?, ?, ?, ?)',
+      [userId, userRole, action, status, normalizeIp(ipAddress)]
     );
   } catch (err) {
     // Logging must never break the request flow.
