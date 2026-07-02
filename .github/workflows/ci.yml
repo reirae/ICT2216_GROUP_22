@@ -76,6 +76,8 @@ jobs:
         run: npm test
 
       - name: Production build
+        env:
+          VITE_CFTS_SITE_KEY: ${{ secrets.VITE_CFTS_SITE_KEY }}
         run: npm run build
 
       # Preserve the existing pipeline's behaviour: publish the built bundle
