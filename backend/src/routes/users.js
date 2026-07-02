@@ -117,7 +117,7 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
       [encryptedSecret, userId]
     );
 
-    await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
+    await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success', ipAddress: req.ip });
 
     res.json({ message: '2FA Authenticator successfully verified and activated!' });
   } catch (err) {
@@ -144,12 +144,12 @@ router.put(
         [userId]
       );
       if (!row || !(await bcrypt.compare(current_password, row.password_hash))) {
-        await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'failure' });
+        await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'failure', ipAddress: req.ip });
         return res.status(400).json({ error: 'Current password is incorrect' });
       }
       const newHash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
       await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
-      await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'success' });
+      await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'success',ipAddress: req.ip });
       res.json({ message: 'Password updated' });
     } catch (err) {
       console.error('[password]', err);
@@ -226,7 +226,7 @@ router.post(
         'INSERT IGNORE INTO user_recipients (user_id, recipient_id) VALUES (?, ?)',
         [userId, recipient.user_id]
       );
-      await writeLog({ userId, userRole: 'user', action: 'BENEFICIARY_ADDED', status: 'success' });
+      await writeLog({ userId, userRole: 'user', action: 'BENEFICIARY_ADDED', status: 'success', ipAddress: req.ip });
       res.status(201).json({ message: 'Recipient saved' });
     } catch (err) {
       console.error('[recipients-add]', err);
@@ -245,7 +245,7 @@ router.delete('/recipients/:id', requireAuth('user'), async (req, res) => {
       [id, userId]
     );
     if (!result.affectedRows) return res.status(404).json({ error: 'Recipient not found' });
-    await writeLog({ userId, userRole: 'user', action: 'BENEFICIARY_REMOVED', status: 'success' });
+    await writeLog({ userId, userRole: 'user', action: 'BENEFICIARY_REMOVED', status: 'success', ipAddress: req.ip });
     res.json({ message: 'Recipient removed' });
   } catch (err) {
     console.error('[recipients-del]', err);
@@ -299,11 +299,11 @@ router.post(
       .slice(0, 100);
 
     if (recipientId === userId) {
-      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure', ipAddress: req.ip });
       return res.status(400).json({ error: 'Cannot transfer to yourself' });
     }
     if (!(amount > 0)) {
-      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure', ipAddress: req.ip });
       return res.status(400).json({ error: 'Amount must be positive' });
     }
 
@@ -347,10 +347,10 @@ router.post(
         );
       });
 
-      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'success' });
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'success', ipAddress: req.ip });
       res.json({ message: 'Transfer completed' });
     } catch (err) {
-      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure', ipAddress: req.ip });
       if (err && err.status && err.json) return res.status(err.status).json(err.json);
       console.error('[transfer]', err);
       res.status(500).json({ error: 'Transfer failed' });
@@ -367,7 +367,7 @@ router.post('/disable-2fa', requireAuth('user'), async (req, res) => {
       [userId]
     );
 
-    await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'success' });
+    await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'success', ipAddress: req.ip });
     res.json({ message: 'Two-Factor Authentication has been successfully disabled.' });
   } catch (err) {
     console.error('[disable-2fa]', err);
@@ -428,7 +428,7 @@ router.put(
         [first_name.trim(), last_name.trim(), email.trim(), phone_number ? phone_number.trim() : null, userId]
       );
 
-      await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'success' });
+      await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'success', ipAddress: req.ip });
       res.json({ message: 'Profile details successfully synchronized!' });
     } catch (err) {
       console.error('[update-profile-error]', err);
