@@ -12,6 +12,12 @@
     "test": "jest --runInBand --passWithNoTests",
     "audit:deps": "npm audit --omit=dev --audit-level=high"
   },
+  "overrides": {
+    "@mapbox/node-pre-gyp": {
+      "tar": "^7.5.16"
+    },
+    "tar": "^7.5.16"
+  },
   "dependencies": {
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
@@ -26,7 +32,7 @@
     "express-validator": "^7.1.0",
     "helmet": "^7.1.0",
     "mysql2": "^3.10.0",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.3",
     "otplib": "^13.4.0",
     "qrcode": "^1.5.4",
     "react-email": "^6.1.5",
