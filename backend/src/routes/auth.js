@@ -228,7 +228,7 @@ router.post('/verify-otp', async (req, res) => {
     await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
     return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
-
+  
   // FIXED: Decrypt the master secret from storage session frame safely at runtime evaluation loop
   const activeSecret = req.session.pendingUser.isSetupPending
     ? tempSecret
@@ -272,8 +272,9 @@ router.post('/verify-otp', async (req, res) => {
   try {
     if (user.isSetupPending) {
       const encryptedSecret = encryptSecret(activeSecret);
-      const targetTable = user.role === 'admin' ? 'admins' : 'users';
-      const targetIdColumn = user.role === 'admin' ? 'admin_id' : 'user_id';
+      const isAdminRow = user.role !== 'user';
+      const targetTable = isAdminRow ? 'admins' : 'users';
+      const targetIdColumn = isAdminRow ? 'admin_id' : 'user_id';
 
       await pool.execute(
         `UPDATE ${targetTable} SET otp_secret = ?, otp_enabled = 1 WHERE ${targetIdColumn} = ?`,
@@ -289,6 +290,25 @@ router.post('/verify-otp', async (req, res) => {
       if (err) return res.status(500).json({ error: 'Session error' });
 
       req.session.user = user;
+      req.session.createdAt = Date.now(); //SSM
+
+      // single active session per user: storing session id in the database
+      // Get the fresh session ID from the regenerated session frame
+      const newSessionId = req.sessionID; 
+      const isAdminRow = user.role !== 'user';
+      const targetTable = isAdminRow ? 'admins' : 'users';
+      const targetIdColumn = isAdminRow ? 'admin_id' : 'user_id';
+      try {
+        // Enforce single active session by updating the database record
+        await pool.execute(
+          `UPDATE ${targetTable} SET active_session_id = ? WHERE ${targetIdColumn} = ?`,
+          [newSessionId, user.id]
+        );
+      } catch (dbErr) {
+        console.error('Failed to update active session ID:', dbErr);
+        return res.status(500).json({ error: 'Authentication session ID update failed' });
+      }
+
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
         await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success', ipAddress: req.ip });
@@ -314,8 +334,21 @@ router.post(
   (req, res) => handleLogin(req, res, 'admin')
 );
 
-router.post('/logout', requireAuth(), (req, res) => {
+router.post('/logout', requireAuth(), async (req, res) => {
   const { id, role } = req.session.user;
+  
+  // single active session per user: session id removal from database
+  const isAdminRow = role !== 'user';
+  const table = isAdminRow ? 'admins' : 'users';
+  const idCol = isAdminRow ? 'admin_id' : 'user_id';
+
+  try {
+    // Clear active session tracking from the database on manual logout
+    await pool.execute(`UPDATE ${table} SET active_session_id = NULL WHERE ${idCol} = ?`, [id]);
+  } catch (dbErr) {
+    console.error('Failed to clear session ID on logout:', dbErr);
+  }
+  
   req.session.destroy(async (err) => {
     if (err) {
       await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'failure', ipAddress: req.ip });
@@ -329,8 +362,9 @@ router.post('/logout', requireAuth(), (req, res) => {
 
 async function handleLogin(req, res, role) {
   const { username, password } = req.body;
-  const table = role === 'admin' ? 'admins' : 'users';
-  const idCol = role === 'admin' ? 'admin_id' : 'user_id';
+  const isAdminRow = role !== 'user';
+  const table = isAdminRow ? 'admins' : 'users';
+  const idCol = isAdminRow ? 'admin_id' : 'user_id';
 
   try {
     const [rows] = await pool.execute(
@@ -361,13 +395,13 @@ async function handleLogin(req, res, role) {
         const attempts = (account.failed_attempts || 0) + 1;
         if (attempts >= LOCK_THRESHOLD) {
           await pool.execute(
-            'UPDATE users SET failed_attempts = ?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE user_id = ?',
-            [attempts, LOCK_MINUTES, account.user_id]
+            `UPDATE users SET failed_attempts = ?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE ${idCol} = ?`,
+            [attempts, LOCK_MINUTES, account[idCol]]
           );
         } else {
           await pool.execute(
-            'UPDATE users SET failed_attempts = ? WHERE user_id = ?',
-            [attempts, account.user_id]
+            `UPDATE users SET failed_attempts = ? WHERE ${idCol} = ?`,
+            [attempts, account[idCol]]
           );
         }
       }
@@ -377,8 +411,8 @@ async function handleLogin(req, res, role) {
 
     if (role === 'user') {
       await pool.execute(
-        'UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?',
-        [account.user_id]
+        `UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE ${idCol} = ?`,
+        [account[idCol]]
       );
     }
 
@@ -415,7 +449,7 @@ async function handleLogin(req, res, role) {
       });
     }
 
-    req.session.regenerate((err) => {
+    req.session.regenerate( async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
       req.session.user = {
         id: String(account[idCol]),
@@ -426,6 +460,20 @@ async function handleLogin(req, res, role) {
         role,
         account_number: account.account_number || null,
       };
+
+      req.session.createdAt = Date.now();
+      
+      // single active session per user: update session id stored in database with the latest session id
+      const newSessionId = req.sessionID;
+      try {
+        await pool.execute(
+          `UPDATE ${table} SET active_session_id = ? WHERE ${idCol} = ?`,
+          [newSessionId, account[idCol]]
+        );
+      } catch (dbErr) {
+        console.error('Failed to update active session ID:', dbErr);
+        return res.status(500).json({ error: 'Authentication session ID update failed' });
+      }
 
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
