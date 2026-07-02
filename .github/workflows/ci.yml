@@ -1,45 +1,166 @@
-name: SecureBank CI
+name: CI
 
+permissions:
+  contents: read
+  security-events: write
+
+# Continuous Integration for SecureBank (ICT2216 Group 22).
+# Runs on every push and pull request to main so every change is linted,
+# tested and built automatically before it can be merged.
 on:
-  pull_request:
-    branches: [dev, main]
   push:
-    branches: [dev, main]
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
   workflow_dispatch:
 
-jobs:
-  build-and-check:
-    name: Build and Check
-    runs-on: ubuntu-latest
+# Cancel superseded runs on the same branch to save runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
+  backend:
+    name: Backend (lint + test + audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
 
-      - name: Install backend dependencies
-        working-directory: backend
+      - name: Install dependencies
         run: npm ci
 
-      - name: Check backend JavaScript syntax
-        working-directory: backend
-        run: find src scripts -name "*.js" -print0 | xargs -0 -n1 node --check
+      - name: Lint
+        run: npm run lint
 
-      - name: Install frontend dependencies
+      - name: Unit tests
+        run: npm test
+
+      - name: Dependency audit (production deps)
+        run: npm run audit:deps
+
+  frontend:
+    name: Frontend (lint + test + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
         run: npm ci
 
-      - name: Build frontend
-        working-directory: frontend
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
         run: npm run build
 
+      # Preserve the existing pipeline's behaviour: publish the built bundle
+      # as a downloadable artifact (used for deployment) on main only.
       - name: Upload frontend build artifact
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: securebank-frontend-dist
           path: frontend/dist
+
+  deploy:
+    name: Deploy production
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download tested frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: securebank-frontend-dist
+          path: release/frontend/dist
+
+      - name: Package backend
+        run: |
+          mkdir -p release/backend
+          cp -R backend/src release/backend/src
+          cp backend/package.json backend/package-lock.json release/backend/
+          tar -C release -czf securebank-${GITHUB_SHA}.tar.gz .
+
+      - name: Configure SSH
+        env:
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$PROD_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload release
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+        run: |
+          scp -i ~/.ssh/deploy_key -P "$PROD_PORT" \
+            "securebank-${GITHUB_SHA}.tar.gz" \
+            "$PROD_USER@$PROD_HOST:/tmp/securebank-${GITHUB_SHA}.tar.gz"
+
+      - name: Activate release
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$PROD_PORT" "$PROD_USER@$PROD_HOST" \
+            "bash -s -- '$GITHUB_SHA'" <<'REMOTE'
+          set -euo pipefail
+          sha="$1"
+          app=/var/www/securebank
+          release="$app/releases/$sha"
+
+          test -f "$app/shared/backend.env"
+          mkdir -p "$release"
+          tar -xzf "/tmp/securebank-$sha.tar.gz" -C "$release"
+          rm "/tmp/securebank-$sha.tar.gz"
+          ln -s "$app/shared/backend.env" "$release/backend/.env"
+
+          cd "$release/backend"
+          npm ci --omit=dev
+
+          ln -sfn "$release" "$app/current"
+          pm2 delete securebank-api 2>/dev/null || true
+          pm2 start "$app/current/backend/src/server.js" \
+            --name securebank-api \
+            --cwd "$app/current/backend"
+          pm2 save
+          REMOTE

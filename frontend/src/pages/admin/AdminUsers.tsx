@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, XCircle, Filter, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { PATTERNS, formatMoney } from '../../utils/format';
+import PageLoader from '../../components/PageLoader';
 
 interface AdminUser {
   user_id: number;
@@ -25,13 +26,15 @@ export default function AdminUsers() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ ...blank });
   const [formError, setFormError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = () =>
     api.get<{ users: AdminUser[] }>('/admin/users')
       .then((d) => setUsers(d.users))
       .catch((e) => setError(e.message));
 
-  useEffect(() => { load(); }, []);
+  // Spinner only on the initial load; later refreshes keep the table visible.
+  useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -50,7 +53,7 @@ export default function AdminUsers() {
   }, [users, search, statusFilter]);
 
   const setStatus = async (id: number, status: AdminUser['status']) => {
-    try { await api.put(`/admin/users/${id}`, { status }); await load(); }
+    try { await api.put(`/admin/users/${id}/status`, { status }); await load(); }
     catch (e: any) { setError(e.message); }
   };
 
@@ -77,13 +80,12 @@ export default function AdminUsers() {
     }
   };
 
+  if (loading) return <PageLoader />;
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3">
         <h1 className="text-2xl sm:text-3xl text-gray-800">User Management</h1>
-        <button onClick={() => setShowAdd(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center">
-          <Plus className="w-4 h-4 mr-2" /> Create User
-        </button>
       </div>
 
       {error && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">{error}</div>}
@@ -145,16 +147,16 @@ export default function AdminUsers() {
         </div>
       </div>
 
+      {/* Desktop View */}
       <div className="hidden lg:block bg-white rounded-lg shadow overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-gray-700">User ID</th>
+                <th className="px-6 py-3 text-left text-gray-700">Account No.</th>
                 <th className="px-6 py-3 text-left text-gray-700">Name</th>
                 <th className="px-6 py-3 text-left text-gray-700">Username</th>
                 <th className="px-6 py-3 text-left text-gray-700">Email</th>
-                <th className="px-6 py-3 text-left text-gray-700">Account No.</th>
                 <th className="px-6 py-3 text-left text-gray-700">Balance</th>
                 <th className="px-6 py-3 text-left text-gray-700">Status</th>
                 <th className="px-6 py-3 text-left text-gray-700">Actions</th>
@@ -163,11 +165,10 @@ export default function AdminUsers() {
             <tbody className="divide-y divide-gray-200">
               {filtered.map((u) => (
                 <tr key={u.user_id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-800">{u.user_id}</td>
+                  <td className="px-6 py-4 font-mono text-gray-600">{u.account_number}</td>
                   <td className="px-6 py-4 text-gray-800">{u.first_name} {u.last_name}</td>
                   <td className="px-6 py-4 text-gray-600">{u.username}</td>
                   <td className="px-6 py-4 text-gray-600">{u.email}</td>
-                  <td className="px-6 py-4 text-gray-600">{u.account_number}</td>
                   <td className="px-6 py-4 text-gray-800">{formatMoney(u.balance)}</td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex px-2 py-1 rounded text-xs ${
@@ -193,12 +194,14 @@ export default function AdminUsers() {
         </div>
       </div>
 
+      {/* Mobile View */}
       <div className="lg:hidden space-y-4">
         {filtered.map((u) => (
           <div key={u.user_id} className="bg-white rounded-lg shadow p-4">
             <div className="flex items-start justify-between mb-3">
               <div>
-                <p className="font-medium text-gray-800">{u.first_name} {u.last_name}</p>
+                <p className="text-sm font-mono text-blue-600 font-bold">Acc: {u.account_number}</p>
+                <p className="font-medium text-gray-800 mt-0.5">{u.first_name} {u.last_name}</p>
                 <p className="text-sm text-gray-600">@{u.username}</p>
               </div>
               <span className={`inline-flex px-2 py-1 rounded text-xs ${
@@ -207,9 +210,7 @@ export default function AdminUsers() {
               }`}>{u.status}</span>
             </div>
             <div className="space-y-1 text-sm mb-3">
-              <p className="text-gray-600">ID: {u.user_id}</p>
               <p className="text-gray-600">{u.email}</p>
-              <p className="text-gray-600">Acc: {u.account_number}</p>
               <p className="font-medium text-gray-800">Balance: {formatMoney(u.balance)}</p>
             </div>
             <label className="block text-xs text-gray-600 mb-1">Change Status</label>

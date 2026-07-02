@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, XCircle } from 'lucide-react';
 import { api } from '../../api/client';
 import { formatDate } from '../../utils/format';
+import PageLoader from '../../components/PageLoader';
 
 interface LogRow {
   log_id: number;
@@ -18,16 +19,24 @@ export default function AdminLogs() {
   const [role, setRole] = useState('all');
   const [status, setStatus] = useState('all');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get<{ logs: LogRow[] }>('/admin/logs')
       .then((d) => setRows(d.logs))
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
+    
+    // Explicitly sort by date and time by default (newest entries first)
+    const sortedRows = [...rows].sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    return sortedRows.filter((r) => {
       if (role !== 'all' && r.user_role !== role) return false;
       if (status !== 'all' && r.status !== status) return false;
       if (!q) return true;
@@ -38,6 +47,8 @@ export default function AdminLogs() {
       );
     });
   }, [rows, search, role, status]);
+
+  if (loading) return <PageLoader />;
 
   return (
     <div>
@@ -82,18 +93,17 @@ export default function AdminLogs() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-gray-700">Log ID</th>
-                <th className="px-6 py-3 text-left text-gray-700">Date & Time</th>
-                <th className="px-6 py-3 text-left text-gray-700">User</th>
+                <th className="px-6 py-3 text-left text-gray-700">User ID</th>
                 <th className="px-6 py-3 text-left text-gray-700">Role</th>
                 <th className="px-6 py-3 text-left text-gray-700">Action</th>
                 <th className="px-6 py-3 text-left text-gray-700">Status</th>
+                <th className="px-6 py-3 text-right text-gray-700">Date & Time</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filtered.map((r) => (
                 <tr key={r.log_id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-gray-800">{r.log_id}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{formatDate(r.created_at)}</td>
                   <td className="px-6 py-4 text-gray-600">{r.user_id ?? '—'}</td>
                   <td className="px-6 py-4 text-gray-600">{r.user_role}</td>
                   <td className="px-6 py-4 text-gray-800">{r.action}</td>
@@ -102,6 +112,7 @@ export default function AdminLogs() {
                       {r.status}
                     </span>
                   </td>
+                  <td className="px-6 py-4 text-sm text-gray-600 text-right">{formatDate(r.created_at)}</td>
                 </tr>
               ))}
             </tbody>

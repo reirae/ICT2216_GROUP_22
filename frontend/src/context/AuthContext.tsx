@@ -10,6 +10,8 @@ export interface SessionUser {
   email: string;
   role: 'user' | 'admin';
   account_number: string | null;
+  user_id?: number;      
+  admin_id?: number;
 }
 
 interface AuthState {

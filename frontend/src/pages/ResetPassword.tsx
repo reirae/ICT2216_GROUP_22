@@ -3,11 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Shield, Mail, RefreshCw, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { api } from '../api/client';
 import { PATTERNS } from '../utils/format';
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+import { useRef } from 'react'
 
 type Stage = 'email' | 'otp' | 'newPassword' | 'success';
 
 export default function ResetPassword() {
   const nav = useNavigate();
+
+  //Captcha
+  const turnstileRef = useRef<TurnstileInstance>(null)
+  const [captcha, setCaptcha] = useState('');
 
   // Stage control
   const [stage, setStage] = useState<Stage>('email');
@@ -37,6 +43,11 @@ export default function ResetPassword() {
     }
   }, [cooldown]);
 
+  const resetTurnstile = () => {
+    turnstileRef.current?.reset() // ← This resets the widget
+    setCaptcha('') // ← Clear the token
+  }
+
   // Stage 1: Check email exists, send OTP
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,9 +58,14 @@ export default function ResetPassword() {
       return;
     }
 
+    // Guard: don't submit without a captcha token
+    if (!captcha) {
+      setError('Please complete the verification check.');
+      return;
+    }
+
     setBusy(true);
     try {
-      // Check if email exists in the database
       const res = await api.post<{ exists: boolean; username: string }>(
         '/auth/check-email',
         { email }
@@ -57,18 +73,18 @@ export default function ResetPassword() {
 
       if (!res.exists) {
         setError('No account found with that email address.');
+        resetTurnstile(); // reset on failure
         return;
       }
 
       setUsername(res.username);
-
-      // Send OTP to that email
-      await api.post('/auth/email-send-otp', { email, username: res.username });
+      await api.post('/auth/email-send-otp', { email, captcha, username: res.username });
 
       setStage('otp');
       setCooldown(30);
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.');
+      resetTurnstile(); // reset on error
     } finally {
       setBusy(false);
     }
@@ -96,17 +112,30 @@ export default function ResetPassword() {
   };
 
   // Resend OTP
+  // NOTE: Turnstile tokens are single-use and expire quickly. The token from
+  // the email stage is already consumed/stale by the time the user reaches
+  // this screen, so we trigger the invisible widget here and wait for a
+  // fresh token before calling the resend endpoint.
   const handleResend = async () => {
     if (cooldown > 0) return;
     setError('');
     setBusy(true);
     try {
-      await api.post('/auth/email-send-otp', { email, username });
+      turnstileRef.current?.execute();
+      const token = await turnstileRef.current?.getResponsePromise();
+
+      if (!token) {
+        setError('Please complete the verification check.');
+        return;
+      }
+
+      await api.post('/auth/email-send-otp', { email, captcha: token, username });
       setOtp('');
       setCooldown(30);
     } catch (err: any) {
       setError(err.message || 'Failed to resend code.');
     } finally {
+      resetTurnstile(); // token is single-use; clear it either way
       setBusy(false);
     }
   };
@@ -197,9 +226,11 @@ export default function ResetPassword() {
                 </div>
               )}
 
+              <Turnstile siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!} onSuccess={(token) => setCaptcha(token)} onError={() => setError('Verification failed. Please try again.')} onExpire={() => setCaptcha('')} />
+
               <button
                 type="submit"
-                disabled={busy}
+                disabled={busy || !captcha}
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium"
               >
                 {busy ? 'Checking…' : 'Send Verification Code'}
@@ -249,6 +280,16 @@ export default function ResetPassword() {
                   {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend Code'}
                 </button>
               </div>
+              {/* Invisible widget, manually triggered — only generates a token when
+                  Resend is actually clicked, so it's never stale by the time it's used */}
+              <Turnstile
+                ref={turnstileRef}
+                options={{ size: 'invisible', execution: 'execute' }}
+                siteKey={(import.meta as any).env.VITE_CFTS_SITE_KEY!}
+                onSuccess={(token) => setCaptcha(token)}
+                onError={() => setError('Verification failed. Please try again.')}
+                onExpire={() => setCaptcha('')}
+              />
 
               {error && (
                 <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm text-center">

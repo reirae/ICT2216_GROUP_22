@@ -1,14 +1,35 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { body } = require('express-validator');
-const { pool } = require('../config/database');
+const { pool, runTransaction } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { writeLog } = require('../utils/logger');
 const { handleValidation, PATTERNS } = require('../middleware/validation');
 const { generateSecret, generateQRCode, verifyTOTP } = require('../utils/totp');
 
+// Securely borrow the attached decryption engine from your auth module
+const authRouter = require('./auth');
+const decryptSecret = authRouter.decryptSecret;
+
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
+const crypto = require('crypto');
+const ENCRYPTION_KEY = Buffer.from(process.env.DB_ENCRYPTION_KEY || '0'.repeat(64), 'hex');
+const IV_LENGTH = 16;
+
+function encryptSecret(text) {
+  if (!text) return null;
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return `${iv.toString('hex')}:${encrypted}:${authTag}`;
+}
+
+// Anti-Replay Cache Registry for Settings Onboarding Flow
+const profileReplayCache = new Set();
+setInterval(() => profileReplayCache.clear(), 30000);
 
 // Dashboard summary: balance + recent transactions.
 router.get('/dashboard', requireAuth('user'), async (req, res) => {
@@ -19,7 +40,14 @@ router.get('/dashboard', requireAuth('user'), async (req, res) => {
       [userId]
     );
     const [recent] = await pool.execute(
-      'SELECT transaction_id, recipient_id, type, amount, description, created_at FROM transaction_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+      `SELECT transaction_id, recipient_id,
+              CASE WHEN amount < 0 THEN 'debit' ELSE 'credit' END AS type,
+              ABS(amount) AS amount,
+              description, created_at
+         FROM transaction_history
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 5`,
       [userId]
     );
     res.json({ user, recent });
@@ -33,7 +61,7 @@ router.get('/dashboard', requireAuth('user'), async (req, res) => {
 router.get('/profile', requireAuth('user'), async (req, res) => {
   try {
     const [[user]] = await pool.execute(
-      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at, (otp_secret IS NOT NULL) AS hasMfaEnabled FROM users WHERE user_id = ?',
+      'SELECT user_id, username, first_name, last_name, email, phone_number, account_number, status, created_at, otp_enabled AS hasMfaEnabled FROM users WHERE user_id = ?',
       [req.session.user.id]
     );
     res.json({ user });
@@ -49,13 +77,9 @@ router.post('/generate-2fa', requireAuth('user'), async (req, res) => {
     const userId = req.session.user.id;
     const username = req.session.user.username;
 
-    // 1. Generate a new math secret
     const secret = generateSecret();
-
-    // 2. Generate the QR code image natively without saving to the DB yet
     const qrCode = await generateQRCode(username, secret);
 
-    // 3. Securely return both to the client browser's session state context
     res.json({ qrCode, tempSecret: secret });
   } catch (err) {
     console.error('[generate-2fa]', err);
@@ -73,22 +97,28 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
   }
 
   try {
-    // Cryptographically check the typed token against the unverified secret key
+    const replayCacheKey = `${userId}:${token}`;
+    if (profileReplayCache.has(replayCacheKey)) {
+      return res.status(400).json({ error: 'This token has already been used to bind a device configuration. Please wait for a new code.' });
+    }
+
     const isValid = verifyTOTP(token, tempSecret);
 
     if (!isValid) {
       return res.status(400).json({ error: 'Invalid verification token. Activation failed.' });
     }
 
-    // Lock the secret column permanently ONLY after successful token roundtrip
+    profileReplayCache.add(replayCacheKey);
+
+    const encryptedSecret = encryptSecret(tempSecret);
+
     await pool.execute(
-      'UPDATE users SET otp_secret = ? WHERE user_id = ?',
-      [tempSecret, userId]
+      'UPDATE users SET otp_secret = ?, otp_enabled = 1 WHERE user_id = ?',
+      [encryptedSecret, userId]
     );
 
-    // Track the security audit trail
     await writeLog({ userId, userRole: 'user', action: '2FA_SETUP', status: 'success' });
-    
+
     res.json({ message: '2FA Authenticator successfully verified and activated!' });
   } catch (err) {
     console.error('[verify-and-activate-2fa]', err);
@@ -132,12 +162,18 @@ router.put(
 router.get('/transactions', requireAuth('user'), async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT t.transaction_id, t.type, t.amount, t.description, t.created_at,
+      `SELECT t.transaction_id,
+              CASE WHEN t.amount < 0 THEN 'debit' ELSE 'credit' END AS type,
+              ABS(t.amount) AS amount,
+              t.description, t.created_at,
+              CONCAT_WS(' ', u.first_name, u.last_name) AS user_name,
+              u.account_number AS user_account,
               t.recipient_id,
               CONCAT_WS(' ', r.first_name, r.last_name) AS recipient_name,
               r.account_number AS recipient_account
          FROM transaction_history t
          LEFT JOIN users r ON r.user_id = t.recipient_id
+         LEFT JOIN users u ON u.user_id = t.user_id
         WHERE t.user_id = ?
         ORDER BY t.created_at DESC`,
       [req.session.user.id]
@@ -201,8 +237,8 @@ router.post(
 
 router.delete('/recipients/:id', requireAuth('user'), async (req, res) => {
   const userId = req.session.user.id;
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+  const id = String(req.params.id);
+  if (!/^[0-9]+$/.test(id)) return res.status(400).json({ error: 'Invalid id' });
   try {
     const [result] = await pool.execute(
       'DELETE FROM user_recipients WHERE user_recipient_id = ? AND user_id = ?',
@@ -245,70 +281,158 @@ router.post(
   [
     body('recipient_id').isInt({ min: 1 }),
     body('amount').matches(PATTERNS.amount),
-    body('description').optional({ checkFalsy: true }).isString().isLength({ max: 255 }),
+    body('description')
+      .optional({ checkFalsy: true })
+      .isString()
+      .isLength({ max: 100 })
+      .matches(/^[a-zA-Z0-9 ]+$/)
+      .withMessage('Description must contain only letters, numbers, and spaces'),
   ],
   handleValidation,
   async (req, res) => {
     const userId = req.session.user.id;
-    const recipientId = Number(req.body.recipient_id);
+    const recipientId = req.body.recipient_id.toString();
     const amount = Number.parseFloat(req.body.amount);
-    const description = (req.body.description || 'Fund transfer').toString();
+    const description = (req.body.description || 'Fund transfer')
+      .toString()
+      .replace(/[^a-zA-Z0-9 ]/g, '')
+      .slice(0, 100);
 
-    if (recipientId === userId) return res.status(400).json({ error: 'Cannot transfer to yourself' });
-    if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be positive' });
+    if (recipientId === userId) {
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      return res.status(400).json({ error: 'Cannot transfer to yourself' });
+    }
+    if (!(amount > 0)) {
+      await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      return res.status(400).json({ error: 'Amount must be positive' });
+    }
 
-    const conn = await pool.getConnection();
     try {
-      await conn.beginTransaction();
-      const [[sender]] = await conn.execute(
-        'SELECT user_id, balance, status FROM users WHERE user_id = ? FOR UPDATE',
-        [userId]
-      );
-      const [[recipient]] = await conn.execute(
-        'SELECT user_id, status FROM users WHERE user_id = ? FOR UPDATE',
-        [recipientId]
-      );
-      if (!sender || sender.status !== 'active') {
-        await conn.rollback();
-        return res.status(403).json({ error: 'Your account is not active' });
-      }
-      if (!recipient || recipient.status !== 'active') {
-        await conn.rollback();
-        return res.status(404).json({ error: 'Recipient is not available' });
-      }
-      if (Number(sender.balance) < amount) {
-        await conn.rollback();
-        return res.status(400).json({ error: 'Insufficient balance' });
-      }
+      await runTransaction(async (conn) => {
+        const [[sender]] = await conn.execute(
+          'SELECT user_id, balance, status FROM users WHERE user_id = ? FOR UPDATE',
+          [userId]
+        );
+        const [[recipient]] = await conn.execute(
+          'SELECT user_id, status FROM users WHERE user_id = ? FOR UPDATE',
+          [recipientId]
+        );
+        if (!sender || sender.status !== 'active') {
+          throw { status: 403, json: { error: 'Your account is not active' } };
+        }
+        if (!recipient || recipient.status !== 'active') {
+          throw { status: 404, json: { error: 'Recipient is not available' } };
+        }
+        if (Number(sender.balance) < amount) {
+          throw { status: 400, json: { error: 'Insufficient balance' } };
+        }
 
-      await conn.execute(
-        'UPDATE users SET balance = balance - ? WHERE user_id = ?',
-        [amount, userId]
-      );
-      await conn.execute(
-        'UPDATE users SET balance = balance + ? WHERE user_id = ?',
-        [amount, recipientId]
-      );
-      await conn.execute(
-        `INSERT INTO transaction_history (user_id, recipient_id, type, amount, description)
-         VALUES (?, ?, 'debit', ?, ?)`,
-        [userId, recipientId, amount, description]
-      );
-      await conn.execute(
-        `INSERT INTO transaction_history (user_id, recipient_id, type, amount, description)
-         VALUES (?, ?, 'credit', ?, ?)`,
-        [recipientId, userId, amount, description]
-      );
-      await conn.commit();
+        await conn.execute(
+          'UPDATE users SET balance = balance - ? WHERE user_id = ?',
+          [amount, userId]
+        );
+        await conn.execute(
+          'UPDATE users SET balance = balance + ? WHERE user_id = ?',
+          [amount, recipientId]
+        );
+        await conn.execute(
+          `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+           VALUES (?, ?, ?, ?)`,
+          [userId, recipientId, -amount, description]
+        );
+        await conn.execute(
+          `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+           VALUES (?, ?, ?, ?)`,
+          [recipientId, userId, amount, description]
+        );
+      });
+
       await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'success' });
       res.json({ message: 'Transfer completed' });
     } catch (err) {
-      await conn.rollback();
-      console.error('[transfer]', err);
       await writeLog({ userId, userRole: 'user', action: 'TRANSFER', status: 'failure' });
+      if (err && err.status && err.json) return res.status(err.status).json(err.json);
+      console.error('[transfer]', err);
       res.status(500).json({ error: 'Transfer failed' });
-    } finally {
-      conn.release();
+    }
+  }
+);
+
+// Disable Multi-Factor Opt-Out Route
+router.post('/disable-2fa', requireAuth('user'), async (req, res) => {
+  const userId = req.session.user.id;
+  try {
+    await pool.execute(
+      'UPDATE users SET otp_secret = NULL, otp_enabled = 0 WHERE user_id = ?',
+      [userId]
+    );
+
+    await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'success' });
+    res.json({ message: 'Two-Factor Authentication has been successfully disabled.' });
+  } catch (err) {
+    console.error('[disable-2fa]', err);
+    res.status(500).json({ error: 'Failed to modify security configurations.' });
+  }
+});
+
+// Update User Profile Details Context with Step-Up Security Verification
+router.put(
+  '/profile',
+  requireAuth('user'),
+  [
+    body('first_name').matches(PATTERNS.name).withMessage('Invalid first name format'),
+    body('last_name').matches(PATTERNS.name).withMessage('Invalid last name format'),
+    body('email').matches(PATTERNS.email).withMessage('Invalid email address format'),
+    body('phone_number').optional({ checkFalsy: true }).isLength({ min: 8, max: 8 }).isNumeric().withMessage('Phone number must be exactly 8 numeric digits')
+  ],
+  handleValidation,
+  async (req, res) => {
+    const userId = req.session.user.id;
+    const { first_name, last_name, email, phone_number, token } = req.body;
+
+    try {
+      // 1. Fetch user's security configuration parameters
+      const [[account]] = await pool.execute(
+        'SELECT otp_secret, otp_enabled FROM users WHERE user_id = ? LIMIT 1',
+        [userId]
+      );
+
+      // 2. Step-Up Security Check: Mandate code verification if MFA status is active
+      if (account && account.otp_enabled === 1) {
+        if (!token || token.length !== 6) {
+          return res.status(400).json({ error: 'Security challenge verification token is required.' });
+        }
+        
+        const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
+        if (plainSecret) {
+          const isValid = verifyTOTP(token, plainSecret);
+          if (!isValid) {
+            return res.status(401).json({ error: 'Security token mismatch. Alteration request rejected.' });
+          }
+        }
+      }
+
+      // 3. Structural Duplicate Check (Email or Phone number collision)
+      const [dupes] = await pool.execute(
+        'SELECT user_id FROM users WHERE (email = ? OR (phone_number = ? AND phone_number IS NOT NULL)) AND user_id <> ? LIMIT 1',
+        [email.trim(), phone_number ? phone_number.trim() : null, userId]
+      );
+      
+      if (dupes.length) {
+        return res.status(409).json({ error: 'This email address or phone number is already bound to another profile.' });
+      }
+
+      // 4. Secure Parameterized SQL Writeback execution
+      await pool.execute(
+        'UPDATE users SET first_name = ?, last_name = ?, email = ?, phone_number = ? WHERE user_id = ?',
+        [first_name.trim(), last_name.trim(), email.trim(), phone_number ? phone_number.trim() : null, userId]
+      );
+
+      await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'success' });
+      res.json({ message: 'Profile details successfully synchronized!' });
+    } catch (err) {
+      console.error('[update-profile-error]', err);
+      res.status(500).json({ error: 'Internal server synchronization error.' });
     }
   }
 );

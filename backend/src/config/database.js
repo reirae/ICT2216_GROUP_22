@@ -12,6 +12,8 @@ const pool = mysql.createPool({
   multipleStatements: false,
   dateStrings: true,
   namedPlaceholders: false,
+  supportBigNumbers: true,
+  bigNumberStrings: true
 });
 
 async function ping() {
@@ -24,3 +26,48 @@ async function ping() {
 }
 
 module.exports = { pool, ping };
+
+/**
+ * Run a function inside a database transaction with optional retries on deadlock.
+ * work is an async function that receives a connection and performs queries.
+ * Options:
+ *  - retries: number of times to retry on deadlock (default 3)
+ *  - isolation: transaction isolation level (default 'SERIALIZABLE')
+ */
+async function runTransaction(work, options = {}) {
+  const retries = Number.isInteger(options.retries) ? options.retries : 3;
+  const isolation = options.isolation || 'SERIALIZABLE';
+  let attempt = 0;
+
+  while (true) {
+    const conn = await pool.getConnection();
+    try {
+      // set isolation level for this transaction
+      await conn.query(`SET TRANSACTION ISOLATION LEVEL ${isolation}`);
+      await conn.beginTransaction();
+
+      const result = await work(conn);
+
+      await conn.commit();
+      conn.release();
+      return result;
+    } catch (err) {
+      try {
+        await conn.rollback();
+      } catch (e) {
+        // ignore rollback errors
+      }
+      conn.release();
+
+      // Retry on common lock errors
+      const retryable = err && (err.code === 'ER_LOCK_DEADLOCK' || err.code === 'ER_LOCK_WAIT_TIMEOUT' || err.errno === 1213 || err.errno === 1205);
+      if (retryable && attempt < retries) {
+        attempt += 1;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+module.exports = { pool, ping, runTransaction };

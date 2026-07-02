@@ -9,8 +9,31 @@ const { handleValidation, PATTERNS } = require('../middleware/validation');
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
 
-// All users (admin view).
-router.get('/users', requireAuth('admin'), async (req, res) => {
+// Helper middleware to verify specific admin sub-roles
+const requireAdminRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.session.user) {
+      return res.status(403).json({ error: 'Access denied: Insufficient administrative privileges.' });
+    }
+
+    const role = req.session.user.role;
+
+    // Allow generic 'admin' role to act as a Super Admin bypass, 
+    // or verify if their specific sub-role is allowed
+    if (role !== 'admin' && !allowedRoles.includes(role)) {
+      return res.status(403).json({ error: 'Access denied: Insufficient administrative privileges.' });
+    }
+    next();
+  };
+};
+
+/* ==========================================================================
+   BUSINESS ADMIN ROUTES (User Management & Transactions)
+   ========================================================================== */
+
+// All users (Business Admin view)
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
+router.get('/users', requireAuth(), requireAdminRole(['business_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT user_id, username, first_name, last_name, email, phone_number,
@@ -19,17 +42,21 @@ router.get('/users', requireAuth('admin'), async (req, res) => {
          FROM users
          ORDER BY user_id ASC`
     );
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'success' });
     res.json({ users: rows });
   } catch (err) {
     console.error('[admin-users]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_USERS', status: 'failure' });
     res.status(500).json({ error: 'Failed to load users' });
   }
 });
 
-// Create user (admin).
+// Create banking user (Business Admin)
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
 router.post(
   '/users',
-  requireAuth('admin'),
+  requireAuth(),
+  requireAdminRole(['business_admin']),
   [
     body('username').matches(PATTERNS.username),
     body('password').matches(PATTERNS.password),
@@ -43,10 +70,13 @@ router.post(
     const { username, password, first_name, last_name, email, phone_number } = req.body;
     try {
       const [dupes] = await pool.execute(
-        'SELECT user_id FROM users WHERE username = ? OR email = ? LIMIT 1',
-        [username, email]
+        'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
+        [username, email, phone_number || null]
       );
-      if (dupes.length) return res.status(409).json({ error: 'Username or email already exists' });
+      if (dupes.length) {
+        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure' });
+        return res.status(409).json({ error: 'Username, email, or phone number already exists' });
+      }
 
       const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       const accountNumber = randomAcct();
@@ -59,97 +89,110 @@ router.post(
       res.status(201).json({ message: 'User created' });
     } catch (err) {
       console.error('[admin-users-create]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_CREATE', status: 'failure' });
       res.status(500).json({ error: 'Failed to create user' });
     }
   }
 );
 
-// Update user (admin).
+// Update user profile details only — status changes use PUT /users/:id/status
 router.put(
   '/users/:id',
-  requireAuth('admin'),
+  requireAuth(),
+  requireAdminRole(['business_admin']),
   [
     body('first_name').optional().matches(PATTERNS.name),
     body('last_name').optional().matches(PATTERNS.name),
     body('email').optional().matches(PATTERNS.email),
     body('phone_number').optional({ checkFalsy: true }).matches(PATTERNS.phone),
-    body('status').optional().isIn(['active', 'suspended', 'deactivated']),
   ],
   handleValidation,
   async (req, res) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
+    const idStr = req.params.id;
 
-    const allowed = ['first_name', 'last_name', 'email', 'phone_number', 'status'];
+    if (!/^\d+$/.test(idStr)) {
+      return res.status(400).json({ error: 'Invalid user ID format.' });
+    }
+
+    // Reject any attempt to change status through this endpoint
+    if (req.body.status !== undefined) {
+      return res.status(400).json({ error: 'Status changes must use PUT /admin/users/:id/status.' });
+    }
+
+    // Confirm the user exists before building the update
+    const [[target]] = await pool.execute('SELECT user_id FROM users WHERE user_id = ?', [idStr]);
+    if (!target) return res.status(404).json({ error: `User with ID ${idStr} not found.` });
+
+    const allowed = ['first_name', 'last_name', 'email', 'phone_number'];
     const fields = [];
     const values = [];
+
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         fields.push(`${key} = ?`);
         values.push(req.body[key]);
       }
     }
-    if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
-    values.push(id);
+
+    if (!fields.length) return res.status(400).json({ error: 'No fields to update.' });
+
+    values.push(idStr);
 
     try {
-      const [result] = await pool.execute(
-        `UPDATE users SET ${fields.join(', ')} WHERE user_id = ?`,
-        values
-      );
-      if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
+      const query = `UPDATE users SET ${fields.join(', ')} WHERE user_id = ?`;
+      await pool.execute(query, values);
 
-      if (req.body.status) {
-        await writeLog({
-          userId: req.session.user.id,
-          userRole: 'admin',
-          action: 'USER_STATUS_CHANGE',
-          status: 'success',
-        });
-      } else {
-        await writeLog({
-          userId: req.session.user.id,
-          userRole: 'admin',
-          action: 'USER_UPDATE',
-          status: 'success',
-        });
-      }
-      res.json({ message: 'User updated' });
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'success' });
+      return res.json({ message: 'User updated successfully' });
     } catch (err) {
       console.error('[admin-users-update]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_UPDATE', status: 'failure' });
       res.status(500).json({ error: 'Failed to update user' });
     }
   }
 );
 
-// Deactivate user (soft delete).
-router.delete('/users/:id', requireAuth('admin'), async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
-  try {
-    const [result] = await pool.execute(
-      "UPDATE users SET status = 'deactivated' WHERE user_id = ?",
-      [id]
-    );
-    if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
-    await writeLog({
-      userId: req.session.user.id,
-      userRole: 'admin',
-      action: 'USER_DEACTIVATE',
-      status: 'success',
-    });
-    res.json({ message: 'User deactivated' });
-  } catch (err) {
-    console.error('[admin-users-delete]', err);
-    res.status(500).json({ error: 'Failed to deactivate user' });
-  }
-});
+// Update user status only (Business Admin) — separated from profile edits for auditability
+router.put(
+  '/users/:id/status',
+  requireAuth(),
+  requireAdminRole(['business_admin']),
+  [body('status').isIn(['active', 'suspended', 'deactivated'])],
+  handleValidation,
+  async (req, res) => {
+    const idStr = req.params.id;
 
-// All transactions.
-router.get('/transactions', requireAuth('admin'), async (req, res) => {
+    if (!/^\d+$/.test(idStr)) {
+      return res.status(400).json({ error: 'Invalid user ID format.' });
+    }
+
+    const { status } = req.body;
+
+    try {
+      // Confirm the user exists and fetch their current status
+      const [[target]] = await pool.execute('SELECT user_id, status FROM users WHERE user_id = ?', [idStr]);
+      if (!target) return res.status(404).json({ error: `User with ID ${idStr} not found.` });
+
+      await pool.execute('UPDATE users SET status = ? WHERE user_id = ?', [status, idStr]);
+
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'success' });
+      return res.json({ message: 'User status updated successfully' });
+    } catch (err) {
+      console.error('[admin-users-status]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'USER_STATUS_CHANGE', status: 'failure' });
+      res.status(500).json({ error: 'Failed to update user status' });
+    }
+  }
+);
+
+// View all transactions (Business Admin)
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
+router.get('/transactions', requireAuth(), requireAdminRole(['business_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT t.transaction_id, t.user_id, t.recipient_id, t.type, t.amount,
+      `SELECT t.transaction_id, t.user_id, t.recipient_id,
+              CASE WHEN t.amount < 0 THEN 'debit' ELSE 'credit' END AS type,
+              ABS(t.amount) AS amount,
               t.description, t.created_at,
               CONCAT_WS(' ', u.first_name, u.last_name) AS user_name,
               u.account_number AS user_account,
@@ -159,15 +202,23 @@ router.get('/transactions', requireAuth('admin'), async (req, res) => {
          LEFT JOIN users r ON r.user_id = t.recipient_id
         ORDER BY t.created_at DESC`
     );
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'success' });
     res.json({ transactions: rows });
   } catch (err) {
     console.error('[admin-transactions]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_TRANSACTIONS', status: 'failure' });
     res.status(500).json({ error: 'Failed to load transactions' });
   }
 });
 
-// Logs.
-router.get('/logs', requireAuth('admin'), async (req, res) => {
+
+/* ==========================================================================
+   IT ADMIN ROUTES (Audit Logs & Business Admin Provisioning)
+   ========================================================================== */
+
+// View system logs (IT Admin)
+// FIXED: Removed 'admin' string restriction constraint from requireAuth
+router.get('/logs', requireAuth(), requireAdminRole(['it_admin']), async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT log_id, user_id, user_role, action, status, created_at
@@ -175,10 +226,84 @@ router.get('/logs', requireAuth('admin'), async (req, res) => {
          ORDER BY created_at DESC
          LIMIT 1000`
     );
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'success' });
     res.json({ logs: rows });
   } catch (err) {
     console.error('[admin-logs]', err);
+    await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'VIEW_LOGS', status: 'failure' });
     res.status(500).json({ error: 'Failed to load logs' });
+  }
+});
+
+// Create New Business Admin Account (IT Admin)
+router.post(
+  '/create-business-admin',
+  requireAuth(),
+  requireAdminRole(['it_admin']),
+  [
+    body('username').matches(PATTERNS.username),
+    body('password').matches(PATTERNS.password),
+    body('first_name').matches(PATTERNS.name),
+    body('last_name').matches(PATTERNS.name),
+    body('email').matches(PATTERNS.email),
+    body('phone_number').matches(PATTERNS.phone),
+  ],
+  handleValidation,
+  async (req, res) => {
+    const { username, password, first_name, last_name, email, phone_number } = req.body;
+    try {
+      const [dupes] = await pool.execute('SELECT admin_id FROM admins WHERE username = ? LIMIT 1', [username]);
+      if (dupes.length) {
+        await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure' });
+        return res.status(409).json({ error: 'Admin username already exists' });
+      }
+
+      const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      
+      await pool.execute(
+        `INSERT INTO admins (username, password_hash, first_name, last_name, email, phone_number, role, otp_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, 'business_admin', 1)`,
+        [username, hash, first_name, last_name, email, phone_number]
+      );
+
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'success' });
+      res.status(201).json({ message: 'Business Admin account successfully created' });
+    } catch (err) {
+      console.error('[admin-create-business]', err);
+      await writeLog({ userId: req.session.user.id, userRole: 'admin', action: 'BUSINESS_ADMIN_CREATE', status: 'failure' });
+      res.status(500).json({ error: 'Failed to create business admin' });
+    }
+  }
+);
+
+// List all administrative accounts (IT Admin view)
+router.get('/list-admins', requireAuth(), requireAdminRole(['it_admin']), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT admin_id, username, first_name, last_name, email, phone_number, role, otp_enabled, created_at
+         FROM admins
+         ORDER BY admin_id ASC`
+    );
+    
+    await writeLog({ 
+      userId: req.session.user.id, 
+      userRole: 'admin', 
+      action: 'VIEW_ADMIN_DIRECTORY', 
+      status: 'success' 
+    });
+    
+    res.json({ admins: rows });
+  } catch (err) {
+    console.error('[admin-list-admins]', err);
+    
+    await writeLog({ 
+      userId: req.session.user.id, 
+      userRole: 'admin', 
+      action: 'VIEW_ADMIN_DIRECTORY', 
+      status: 'failure' 
+    });
+    
+    res.status(500).json({ error: 'Failed to load administrative directory' });
   }
 });
 
