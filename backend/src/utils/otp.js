@@ -3,8 +3,15 @@ const { render } = require("@react-email/render");
 const { transporter } = require("./mailer");
 
 // Register ts-node so .tsx files can be required
-require("ts-node").register({ transpileOnly: true });
-const OtpEmail = require("../emails/OtpEmail").default;
+require("ts-node").register({
+  transpileOnly: true,
+  compilerOptions: {
+    module: "CommonJS",
+    jsx: "react",
+    ignoreDeprecations: "6.0",
+  },
+});
+const OtpEmail = require("../emails/OtpEmail.tsx").default;
 
 // TODO: Replace with Redis before going to production
 const otpStore = new Map();
