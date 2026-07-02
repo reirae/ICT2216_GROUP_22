@@ -118,12 +118,6 @@ export default function Login() {
             <Shield className="w-8 h-8 sm:w-10 sm:h-10 text-blue-600 mr-2 sm:mr-3" />
             <h1 className="text-xl sm:text-2xl text-blue-600">SecureBank</h1>
           </div>
-          <Link
-            to="/register"
-            className="px-4 sm:px-6 py-2 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Register
-          </Link>
         </div>
       </header>
 
@@ -273,13 +267,10 @@ export default function Login() {
                 Don't have an account?{' '}
                 <Link to="/register" className="text-blue-600 hover:underline">Register here</Link>
               </div>
-              <div className="mt-6 text-center text-sm sm:text-base text-gray-600">
+              <div className="mt-3 text-center text-sm sm:text-base text-gray-600">
                 <Link to="/reset-password" className="text-blue-600 hover:underline text-sm">
                   Forgot password?
                 </Link>
-              </div>
-              <div className="mt-4 text-center text-xs text-gray-500">
-                <Link to="/admin/login" className="hover:underline">Admin sign in</Link>
               </div>
             </>
           )}
