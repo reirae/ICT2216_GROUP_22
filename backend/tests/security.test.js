@@ -11,94 +11,77 @@ jest.mock('../src/utils/notifications', () => ({
   sendPasswordChangedEmail: jest.fn().mockResolvedValue(true)
 }));
 
-// Now it is 100% safe to import the app blueprint without any compilation blocks!
 const app = require('../src/app');
 
-describe('🔒 SecureBank Global Access Control Validation', () => {
+// HELPER FUNCTION: Recursively extract all endpoints from the Express router stack
+function getRoutes(router, prefix = '') {
+  let routes = [];
+  if (!router || !router.stack) return routes;
 
-  // ------------------------------------------------------------------
-  // Unauthenticated access — every session-gated endpoint must 401
-  // ------------------------------------------------------------------
-  const protectedEndpoints = [
-    // --- Auth (session-gated only) ---
-    { path: '/api/auth/logout', method: 'post' },
-
-    // --- User (requireAuth('user')) ---
-    { path: '/api/user/dashboard', method: 'get' },
-    { path: '/api/user/profile', method: 'get' },
-    { path: '/api/user/profile', method: 'put' },
-    { path: '/api/user/generate-2fa', method: 'post' },
-    { path: '/api/user/verify-and-activate-2fa', method: 'post' },
-    { path: '/api/user/password', method: 'put' },
-    { path: '/api/user/transactions', method: 'get' },
-    { path: '/api/user/recipients', method: 'get' },
-    { path: '/api/user/recipients', method: 'post' },
-    { path: '/api/user/recipients/1', method: 'delete' },
-    { path: '/api/user/lookup', method: 'get' },
-    { path: '/api/user/transfer', method: 'post' },
-    { path: '/api/user/disable-2fa', method: 'post' },
-
-    // --- Admin (requireAuth() + role check) ---
-    { path: '/api/admin/users', method: 'get' },
-    { path: '/api/admin/users', method: 'post' },
-    { path: '/api/admin/users/1', method: 'put' },
-    { path: '/api/admin/users/1/status', method: 'put' },
-    { path: '/api/admin/transactions', method: 'get' },
-    { path: '/api/admin/logs', method: 'get' },
-    { path: '/api/admin/create-business-admin', method: 'post' },
-    { path: '/api/admin/list-admins', method: 'get' },
-  ];
-
-  protectedEndpoints.forEach(({ path, method }) => {
-    it(`should deny unauthorized access to ${method.toUpperCase()} ${path}`, async () => {
-      const res = await request(app)[method](path).set('Accept', 'application/json');
-
-      // Asserts that the requireAuth interceptor stops requests with a 401
-      expect(res.statusCode).toBe(401);
-    });
+  router.stack.forEach((layer) => {
+    if (layer.route) {
+      // Direct route registered on this router layer
+      const path = prefix + layer.route.path;
+      Object.keys(layer.route.methods).forEach((method) => {
+        routes.push({ path: path.replace(/\/+$/, ''), method });
+      });
+    } else if (layer.name === 'router' && layer.handle && layer.handle.stack) {
+      // Router middleware (e.g., app.use('/api/user', userRoutes))
+      let newPrefix = prefix;
+      if (layer.regexp && layer.regexp.source) {
+        // Clean up Express route regex to extract the path prefix
+        const match = layer.regexp.source
+          .replace('^\\', '')
+          .replace('\\/?(?=\\/|$)', '')
+          .replace('(?=\\/|$)', '')
+          .replace('\\/', '/');
+        newPrefix = prefix + match.split('?')[0];
+      }
+      routes = routes.concat(getRoutes(layer.handle, newPrefix));
+    }
   });
+  return routes;
+}
+
+describe('🔒 SecureBank Global Access Control Validation', () => {
+  let dynamicEndpoints = [];
+
+  beforeAll(() => {
+    // Dynamically scrape all endpoints from your Express app instance at runtime
+    const allRoutes = getRoutes(app._router);
+    
+    // Filter to target only session-gated paths (/api/user and /api/admin)
+    // Exclude /api/auth/me from the loop since it requires its own special assertion
+    dynamicEndpoints = allRoutes.filter(({ path }) => 
+      (path.startsWith('/api/user') || path.startsWith('/api/admin') || path === '/api/auth/logout') &&
+      path !== '/api/auth/me'
+    );
+  });
+
+  // This block runs dynamically based on whatever endpoints are parsed above!
+  it('should deny unauthorized access to all protected endpoints', async () => {
+    expect(dynamicEndpoints.length).toBeGreaterThan(0); // Sanity check that routes were found
+
+    for (const { path, method } of dynamicEndpoints) {
+      // Standardize dynamic path parameters (e.g., /api/user/recipients/:id -> /api/user/recipients/1)
+      const testPath = path.replace(/:[a-zA-Z0-9_]+/g, '1');
+      
+      const res = await request(app)[method](testPath).set('Accept', 'application/json');
+      
+      // Every session-gated endpoint must return 401 when anonymous
+      if (res.statusCode !== 401) {
+        console.error(`❌ Access Control Failure on: ${method.toUpperCase()} ${path} (Received: ${res.statusCode})`);
+      }
+      expect(res.statusCode).toBe(401);
+    }
+  }, 30000);
 
   // ------------------------------------------------------------------
   // GET /api/auth/me — special case, returns 401 when unauthenticated
   // ------------------------------------------------------------------
   it('should return 401 and user null for GET /api/auth/me with no session', async () => {
     const res = await request(app).get('/api/auth/me').set('Accept', 'application/json');
-
     expect(res.statusCode).toBe(401);
     expect(res.body.user).toBeNull();
-  });
-
-});
-
-// ==========================================================================
-// Admin role boundary validation (Skipped for now until session helper is wired)
-// ==========================================================================
-describe.skip('🔒 SecureBank Admin Role Boundary Validation', () => {
-  const businessAdminOnlyRoutes = [
-    { path: '/api/admin/users', method: 'get' },
-    { path: '/api/admin/users', method: 'post' },
-    { path: '/api/admin/users/1', method: 'put' },
-    { path: '/api/admin/users/1/status', method: 'put' },
-    { path: '/api/admin/transactions', method: 'get' },
-  ];
-
-  const itAdminOnlyRoutes = [
-    { path: '/api/admin/logs', method: 'get' },
-    { path: '/api/admin/create-business-admin', method: 'post' },
-    { path: '/api/admin/list-admins', method: 'get' },
-  ];
-
-  function sessionCookieFor(role) {
-    throw new Error('sessionCookieFor() is a placeholder');
-  }
-
-  describe('generic admin role (super-admin bypass)', () => {
-    [...businessAdminOnlyRoutes, ...itAdminOnlyRoutes].forEach(({ path, method }) => {
-      it(`allows role='admin' to reach ${method.toUpperCase()} ${path}`, async () => {
-        const cookie = sessionCookieFor('admin');
-        const res = await request(app)[method](path).set('Cookie', cookie).set('Accept', 'application/json');
-        expect(res.statusCode).not.toBe(403);
-      });
-    });
   });
 });
