@@ -7,6 +7,7 @@ require("ts-node").register({
   transpileOnly: true,
   compilerOptions: {
     module: "CommonJS",
+    moduleResolution: "node",
     jsx: "react",
     ignoreDeprecations: "6.0",
   },
