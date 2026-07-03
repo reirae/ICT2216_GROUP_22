@@ -8,6 +8,7 @@ const session = require('express-session');
 const compression = require('compression');
 
 const { generalLimiter } = require('./middleware/rateLimiter');
+const { verifyCsrfToken } = require('./middleware/csrf');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const adminRoutes = require('./routes/admin');
@@ -45,6 +46,11 @@ app.use(session({
 }));
 
 app.use(generalLimiter);
+
+// Anti-CSRF Framework: verify a session-bound token on every
+// state-changing request (see middleware/csrf.js for the exemption
+// list covering pre-authentication endpoints).
+app.use(verifyCsrfToken);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);

@@ -6,13 +6,31 @@ export interface ApiError extends Error {
   details?: unknown;
 }
 
+// Anti-CSRF Framework (client side): the backend mints a session-bound
+// CSRF token on login/`/auth/me` and expects it echoed back in the
+// X-CSRF-Token header on every state-changing request. The token is
+// kept only in memory (never in localStorage/a readable cookie) and is
+// refreshed automatically whenever a response includes a new one.
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null) {
+  csrfToken = token;
+}
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method || 'GET').toUpperCase();
+
   const res = await fetch(`/api${path}`, {
     credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(options.body && !(options.body instanceof FormData)
         ? { 'Content-Type': 'application/json' }
+        : {}),
+      ...(MUTATING_METHODS.has(method) && csrfToken
+        ? { 'X-CSRF-Token': csrfToken }
         : {}),
       ...(options.headers || {}),
     },
@@ -21,6 +39,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const text = await res.text();
   const data = text ? safeJson(text) : null;
+
+  // Pick up a fresh token whenever the backend hands one out (login,
+  // 2FA verification, /auth/me) so subsequent mutating requests stay
+  // in sync with the current session.
+  if (data && typeof data.csrfToken === 'string') {
+    setCsrfToken(data.csrfToken);
+  }
 
   if (!res.ok) {
     const err = new Error(
