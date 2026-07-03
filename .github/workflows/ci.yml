@@ -154,7 +154,7 @@ jobs:
           mkdir -p "$release"
           tar -xzf "/tmp/securebank-$sha.tar.gz" -C "$release"
           rm "/tmp/securebank-$sha.tar.gz"
-          ln -s "$app/shared/backend.env" "$release/backend/.env"
+          ln -sf "$app/shared/backend.env" "$release/backend/.env"
 
           cd "$release/backend"
           npm ci --omit=dev
