@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "build": "tsc --project tsconfig.json",
     "email:dev": "email dev --dir src/emails --port 3001",
     "lint": "eslint src scripts",
     "test": "jest --runInBand --passWithNoTests",
@@ -37,7 +38,6 @@
     "qrcode": "^1.5.4",
     "react-email": "^6.1.5",
     "speakeasy": "^2.0.0",
-    "ts-node": "^10.9.2",
     "twilio": "^6.0.2",
     "typescript": "^6.0.3"
   },
