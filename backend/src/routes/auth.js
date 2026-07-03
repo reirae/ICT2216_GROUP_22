@@ -7,6 +7,7 @@ const { writeLog } = require('../utils/logger');
 const { loginLimiter } = require('../middleware/rateLimiter');
 const { handleValidation, verifyCaptcha, PATTERNS } = require('../middleware/validation');
 const { requireAuth } = require('../middleware/auth');
+const { ensureCsrfToken } = require('../middleware/csrf');
 const { sendOtpEmail, verifyOtp } = require("../utils/otp");
 const { sendPasswordChangedEmail } = require("../utils/notifications");
 const { verifyTOTP } = require('../utils/totp');
@@ -76,7 +77,8 @@ router.get('/captcha', (req, res) => {
 
 router.get('/me', (req, res) => {
   if (req.session && req.session.user) {
-    return res.json({ user: req.session.user });
+    const csrfToken = ensureCsrfToken(req);
+    return res.json({ user: req.session.user, csrfToken });
   }
   res.status(401).json({ user: null });
 });
@@ -291,6 +293,7 @@ router.post('/verify-otp', async (req, res) => {
 
       req.session.user = user;
       req.session.createdAt = Date.now(); //SSM
+      const csrfToken = ensureCsrfToken(req);
 
       // single active session per user: storing session id in the database
       // Get the fresh session ID from the regenerated session frame
@@ -312,7 +315,7 @@ router.post('/verify-otp', async (req, res) => {
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
         await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success', ipAddress: req.ip });
-        res.json({ user: req.session.user });
+        res.json({ user: req.session.user, csrfToken });
       });
     });
   } catch (err) {
@@ -462,7 +465,8 @@ async function handleLogin(req, res, role) {
       };
 
       req.session.createdAt = Date.now();
-      
+      const csrfToken = ensureCsrfToken(req);
+
       // single active session per user: update session id stored in database with the latest session id
       const newSessionId = req.sessionID;
       try {
@@ -478,7 +482,7 @@ async function handleLogin(req, res, role) {
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
         writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
-        res.json({ user: req.session.user });
+        res.json({ user: req.session.user, csrfToken });
       });
     });
   } catch (err) {
