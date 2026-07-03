@@ -1,17 +1,6 @@
 const { render } = require("@react-email/render");
 const { transporter } = require("./mailer");
-
-// Register ts-node so .tsx files can be required
-require("ts-node").register({
-  transpileOnly: true,
-  compilerOptions: {
-    module: "CommonJS",
-    moduleResolution: "node",
-    jsx: "react",
-    ignoreDeprecations: "6.0",
-  },
-});
-const PasswordChangedEmail = require("../emails/PasswordChangedEmail.tsx").default;
+const PasswordChangedEmail = require("../../dist/emails/PasswordChangedEmail").default;
 
 async function sendPasswordChangedEmail(email, username) {
   const changedAt = new Date().toLocaleString("en-SG", {
@@ -27,8 +16,6 @@ async function sendPasswordChangedEmail(email, username) {
     subject: "Your PIN was changed",
     html,
   });
-
-  console.log(`Password-changed notice sent to ${email}`);
 }
 
 module.exports = { sendPasswordChangedEmail };
