@@ -286,6 +286,9 @@ router.post('/verify-otp', async (req, res) => {
     delete user.encrypted_otp_secret; // Data Minimization removal before cookie compilation
     delete user.isSetupPending;
 
+    // Log LOGIN success now that credentials + TOTP are both verified
+    await writeLog({ userId, userRole: user.role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
+
     req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
 
