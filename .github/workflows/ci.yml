@@ -109,10 +109,24 @@ jobs:
           name: securebank-frontend-dist
           path: release/frontend/dist
 
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies and compile email templates
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
       - name: Package backend
         run: |
           mkdir -p release/backend
           cp -R backend/src release/backend/src
+          cp -R backend/dist release/backend/dist
           cp backend/package.json backend/package-lock.json release/backend/
           tar -C release -czf securebank-${GITHUB_SHA}.tar.gz .
 

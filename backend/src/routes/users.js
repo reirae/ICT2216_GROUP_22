@@ -366,11 +366,11 @@ router.post('/disable-2fa', requireAuth('user'), async (req, res) => {
       'UPDATE users SET otp_secret = NULL, otp_enabled = 0 WHERE user_id = ?',
       [userId]
     );
-
     await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'success', ipAddress: req.ip });
     res.json({ message: 'Two-Factor Authentication has been successfully disabled.' });
   } catch (err) {
     console.error('[disable-2fa]', err);
+    await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'failure', ipAddress: req.ip });
     res.status(500).json({ error: 'Failed to modify security configurations.' });
   }
 });
@@ -400,13 +400,15 @@ router.put(
       // 2. Step-Up Security Check: Mandate code verification if MFA status is active
       if (account && account.otp_enabled === 1) {
         if (!token || token.length !== 6) {
+          await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'failure', ipAddress: req.ip });
           return res.status(400).json({ error: 'Security challenge verification token is required.' });
         }
-        
+
         const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
         if (plainSecret) {
           const isValid = verifyTOTP(token, plainSecret);
           if (!isValid) {
+            await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'failure', ipAddress: req.ip });
             return res.status(401).json({ error: 'Security token mismatch. Alteration request rejected.' });
           }
         }
@@ -417,8 +419,9 @@ router.put(
         'SELECT user_id FROM users WHERE (email = ? OR (phone_number = ? AND phone_number IS NOT NULL)) AND user_id <> ? LIMIT 1',
         [email.trim(), phone_number ? phone_number.trim() : null, userId]
       );
-      
+
       if (dupes.length) {
+        await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'failure', ipAddress: req.ip });
         return res.status(409).json({ error: 'This email address or phone number is already bound to another profile.' });
       }
 
@@ -432,6 +435,7 @@ router.put(
       res.json({ message: 'Profile details successfully synchronized!' });
     } catch (err) {
       console.error('[update-profile-error]', err);
+      await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'failure', ipAddress: req.ip });
       res.status(500).json({ error: 'Internal server synchronization error.' });
     }
   }
