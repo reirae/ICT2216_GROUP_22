@@ -39,7 +39,7 @@ if (!req.session || !req.session.user) {
       if (!rows.length || rows[0].active_session_id !== req.sessionID) {
         return req.session.destroy(async (err) => {
           res.clearCookie(process.env.SESSION_COOKIE_NAME || 'securebank.sid');
-          await writeLog({ userId: id, userRole, action: 'SESSION_TERMINATED_CONCURRENT', status: 'success' });
+          await writeLog({ userId: id, userRole, action: 'SESSION_TERMINATED_CONCURRENT', status: 'success', ipAddress: req.ip });
           return res.status(401).json({ error: 'Your account was logged in from another location. This session has been terminated.' });
         });
       }
@@ -53,7 +53,7 @@ if (!req.session || !req.session.user) {
     if (sessionAge > ABSOLUTE_TIMEOUT_MS) {
       return req.session.destroy(async (err) => {
         res.clearCookie(process.env.SESSION_COOKIE_NAME || 'securebank.sid');
-        await writeLog({ userId: id, userRole, action: 'SESSION_EXPIRED', status: 'success' });
+        await writeLog({ userId: id, userRole, action: 'SESSION_EXPIRED', status: 'success', ipAddress: req.ip });
         return res.status(401).json({ error: 'Session expired. Please log in again.' });
       });
     }
