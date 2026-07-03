@@ -1,18 +1,7 @@
 const crypto = require("crypto");
 const { render } = require("@react-email/render");
 const { transporter } = require("./mailer");
-
-// Register ts-node so .tsx files can be required
-require("ts-node").register({
-  transpileOnly: true,
-  compilerOptions: {
-    module: "CommonJS",
-    moduleResolution: "node",
-    jsx: "react",
-    ignoreDeprecations: "6.0",
-  },
-});
-const OtpEmail = require("../emails/OtpEmail.tsx").default;
+const OtpEmail = require("../../dist/emails/OtpEmail").default;
 
 // TODO: Replace with Redis before going to production
 const otpStore = new Map();
@@ -29,8 +18,6 @@ function saveOtp(email, otp) {
 }
 
 function verifyOtp(email, inputOtp) {
-    console.log("Store contents:", [...otpStore.entries()]);
-  console.log("Looking for:", email, "| Got:", inputOtp);
   const record = otpStore.get(email);
   if (!record) return false;
   if (Date.now() > record.expiresAt) {
@@ -54,8 +41,6 @@ async function sendOtpEmail(email, username) {
     subject: "Your verification code",
     html,
   });
-
-  console.log(`OTP sent to ${email}`);
 }
 
 module.exports = { generateOtp, saveOtp, verifyOtp, sendOtpEmail };
