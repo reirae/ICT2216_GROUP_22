@@ -247,7 +247,7 @@ router.post('/verify-otp', async (req, res) => {
 
   if (!isValid) {
     req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
-    await writeLog({ userId: req.session.pendingUser?.id || null, userRole: 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
+    await writeLog({ userId: req.session.pendingUser?.id || null, userRole: req.session.pendingUser?.role || 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
 
     if (req.session.otpAttempts >= 3) {
       delete req.session.pendingUser;
@@ -377,17 +377,18 @@ async function handleLogin(req, res, role) {
     const account = rows[0];
 
     if (!account) {
+      // account not found — role from DB unavailable, fall back to generic role param
       await writeLog({ userRole: role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (role === 'user') {
       if (account.locked_until && new Date(account.locked_until) > new Date()) {
-        await writeLog({ userId: account[idCol], userRole: 'user', action: 'LOGIN', status: 'failure', ipAddress: req.ip });
+        await writeLog({ userId: account[idCol], userRole: account.role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
         return res.status(423).json({ error: 'Account is temporarily locked. Try again later.' });
       }
       if (account.status !== 'active') {
-        await writeLog({ userId: account[idCol], userRole: 'user', action: 'LOGIN', status: 'failure', ipAddress: req.ip });
+        await writeLog({ userId: account[idCol], userRole: account.role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
         return res.status(403).json({ error: 'Account is not active.' });
       }
     }
@@ -408,7 +409,7 @@ async function handleLogin(req, res, role) {
           );
         }
       }
-      await writeLog({ userId: account[idCol], userRole: role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
+      await writeLog({ userId: account[idCol], userRole: account.role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -452,7 +453,7 @@ async function handleLogin(req, res, role) {
       });
     }
 
-    req.session.regenerate( async (err) => {
+    req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
       req.session.user = {
         id: String(account[idCol]),
@@ -460,7 +461,7 @@ async function handleLogin(req, res, role) {
         first_name: account.first_name,
         last_name: account.last_name,
         email: account.email,
-        role,
+        role: account.role || role,
         account_number: account.account_number || null,
       };
 
@@ -480,7 +481,7 @@ async function handleLogin(req, res, role) {
 
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-        writeLog({ userId: req.session.user.id, userRole: role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
+        writeLog({ userId: req.session.user.id, userRole: account.role || role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
         res.json({ user: req.session.user });
       });
     });
