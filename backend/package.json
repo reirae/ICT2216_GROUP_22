@@ -37,6 +37,7 @@
     "qrcode": "^1.5.4",
     "react-email": "^6.1.5",
     "speakeasy": "^2.0.0",
+    "ts-node": "^10.9.2",
     "twilio": "^6.0.2",
     "typescript": "^6.0.3"
   },
