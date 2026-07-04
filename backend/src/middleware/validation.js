@@ -73,6 +73,20 @@ function validateSessionPathContext(req, res, next) {
   if (!req.session || !req.session.user) {
     return next();
   }
+
+  // Read the isolated request header appended by the specific tab context layer
+  const clientTabHeader = req.headers['x-account-session-id'];
+  const serverSavedTabId = req.session.tabSessionId;
+
+  // TAB CO-EXISTENCE BOUNDARY GATE:
+  // If the specific tab context header does not match the active session cookie token,
+  // do NOT call req.session.destroy()! Quietly send a localized 401 response back to this tab.
+  if (clientTabHeader && serverSavedTabId && clientTabHeader !== serverSavedTabId) {
+    return res.status(401).json({ 
+      error: 'SWITCHED_SESSION',
+      message: 'Isolated tab context mismatch detected.' 
+    });
+  }
   
   const isApiAdminRoute = currentPath.startsWith('/api/admin');
   

@@ -13,8 +13,21 @@ export interface ApiError extends Error {
 // refreshed automatically whenever a response includes a new one.
 let csrfToken: string | null = null;
 
+// Initialize tab isolation token context from tab-sandboxed sessionStorage on boot
+let tabSessionId: string | null = sessionStorage.getItem('securebank_tab_sid');
+
 export function setCsrfToken(token: string | null) {
   csrfToken = token;
+}
+
+// Provide a thread-safe setter to bind the token context dynamically
+export function setTabSessionId(token: string | null) {
+  tabSessionId = token;
+  if (token) {
+    sessionStorage.setItem('securebank_tab_sid', token);
+  } else {
+    sessionStorage.removeItem('securebank_tab_sid');
+  }
 }
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -32,6 +45,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...(MUTATING_METHODS.has(method) && csrfToken
         ? { 'X-CSRF-Token': csrfToken }
         : {}),
+      ...(tabSessionId ? { 'X-Account-Session-Id': tabSessionId } : {}),
       ...(options.headers || {}),
     },
     ...options,
@@ -45,6 +59,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   // in sync with the current session.
   if (data && typeof data.csrfToken === 'string') {
     setCsrfToken(data.csrfToken);
+  }
+
+  // Auto-capture isolation context token properties during /auth/me or login handshakes
+  if (data && typeof data.tabSessionId === 'string') {
+    setTabSessionId(data.tabSessionId);
   }
 
   if (!res.ok) {

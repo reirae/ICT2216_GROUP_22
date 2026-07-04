@@ -352,7 +352,10 @@ router.post('/verify-otp', async (req, res) => {
     req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
 
+      const tabSessionId = crypto.randomBytes(16).toString('hex');
+
       req.session.user = finalUser;
+      req.session.tabSessionId = tabSessionId;
       req.session.createdAt = Date.now(); //SSM
       const csrfToken = ensureCsrfToken(req);
 
@@ -362,6 +365,7 @@ router.post('/verify-otp', async (req, res) => {
       const isAdminRow = finalUser.role !== 'user';
       const targetTable = isAdminRow ? 'admins' : 'users';
       const targetIdColumn = isAdminRow ? 'admin_id' : 'user_id';
+      
       try {
         // Enforce single active session by updating the database record
         await pool.execute(
@@ -376,7 +380,7 @@ router.post('/verify-otp', async (req, res) => {
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
         await writeLog({ userId: finalUser.id, userRole: finalUser.role, action: 'LOGIN_2FA', status: 'success', ipAddress: req.ip });
-        res.json({ user: req.session.user, csrfToken });
+        res.json({ user: req.session.user, csrfToken, tabSessionId });
       });
     });
   } catch (err) {

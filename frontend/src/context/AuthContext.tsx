@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, setCsrfToken } from '../api/client';
+import { setTabSessionId } from '../api/client';
 
 export interface SessionUser {
   id: number;
@@ -69,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout'); } catch { /* ignore */ }
     setCsrfToken(null);
+    setTabSessionId(null);
     setUser(null);
   }, []);
 
