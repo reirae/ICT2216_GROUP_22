@@ -28,7 +28,7 @@ export function ProtectedRoute({ children, role, allowedRoles }: Props) {
           <ShieldAlert className="w-16 h-16 text-red-600 mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Authentication Required</h2>
           <p className="text-gray-600 text-center mb-6">
-            Your session is missing, has expired, or was securely terminated due to multi-account synchronization changes on this device. Please log back in.
+            Another account has been signed in on this device. Please log back in.
           </p>
           <button
             onClick={() => (window.location.href = redirectTarget)}

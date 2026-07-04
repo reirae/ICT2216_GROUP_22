@@ -115,7 +115,7 @@ export default function AdminLogin() {
           setUsername('');
           setPassword('');
           resetTurnstile();
-          setError(err.message || 'Too many failed attempts. Please sign in again.');
+          setError(err.message || 'Another account has been signed in. Please sign in again.');
         } else if (details.mfaToken) {
           setMfaToken(details.mfaToken);
           setError(`${err.message} (${details.attemptsRemaining} attempts remaining)`);

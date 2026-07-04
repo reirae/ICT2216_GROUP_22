@@ -119,7 +119,7 @@ export default function Login() {
           setUsername('');
           setPassword('');
           resetTurnstile();
-          setError(err.message || 'Too many failed attempts. Please sign in again.');
+          setError(err.message || 'Another account has been signed in. Please sign in again.');
         } else if (details.mfaToken) {
           setMfaToken(details.mfaToken); // Update to new token data string
           setError(`${err.message} (${details.attemptsRemaining} attempts remaining)`);

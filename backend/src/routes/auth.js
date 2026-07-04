@@ -260,7 +260,7 @@ router.post('/verify-otp', async (req, res) => {
     return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
   
-  // FIXED: Decrypt the master secret from storage session frame safely at runtime evaluation loop
+  // Decrypt the master secret from storage session frame safely at runtime evaluation loop
   const activeSecret = pendingUser.isSetupPending
     ? tempSecret
     : decryptSecret(pendingUser.encrypted_otp_secret);
@@ -277,7 +277,6 @@ router.post('/verify-otp', async (req, res) => {
   const isValid = verifyTOTP(otp, activeSecret);
 
   if (!isValid) {
-    // req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
     const currentAttempts = (pendingUser.attempts || 0) + 1;
     await writeLog({ userId: pendingUser?.id || null, userRole: pendingUser?.role || 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
 
@@ -296,29 +295,29 @@ router.post('/verify-otp', async (req, res) => {
       res.status(401).json({ error: 'Invalid verification code.' });
     });
 
-  usedTokensCache.add(replayCacheKey);
+    usedTokensCache.add(replayCacheKey);
 
-  const user = req.session.pendingUser;
-  const userId = user.id;*/
+    const user = req.session.pendingUser;
+    const userId = user.id;*/
 
-  // Lockout function: Clears token context entirely after 3 failures
-  if (currentAttempts >= 3) {
+    // Lockout function: Clears token context entirely after 3 failures
+    if (currentAttempts >= 3) {
+      return res.status(401).json({ 
+        error: 'Too many failed attempts. Please sign in again.',
+        clearMfaState: true // Flags frontend to wipe local MFA components
+      });
+    }
+
+    // Generate an updated token containing the new attempt incrementation to pass back to frontend state
+    const updatedUserPayload = { ...pendingUser, attempts: currentAttempts };
+    delete updatedUserPayload.exp; // generateMfaToken sets a fresh lifespan window
+    const newMfaToken = generateMfaToken(updatedUserPayload);
+
     return res.status(401).json({ 
-      error: 'Too many failed attempts. Please sign in again.',
-      clearMfaState: true // Flags frontend to wipe local MFA components
+      error: 'Invalid verification code.',
+      attemptsRemaining: 3 - currentAttempts,
+      mfaToken: newMfaToken // Update token context in frontend state container
     });
-  }
-
-  // Generate an updated token containing the new attempt incrementation to pass back to frontend state
-  const updatedUserPayload = { ...pendingUser, attempts: currentAttempts };
-  delete updatedUserPayload.exp; // generateMfaToken sets a fresh lifespan window
-  const newMfaToken = generateMfaToken(updatedUserPayload);
-
-  return res.status(401).json({ 
-    error: 'Invalid verification code.',
-    attemptsRemaining: 3 - currentAttempts,
-    mfaToken: newMfaToken // Update token context in frontend state container
-  });
 
   }
 
