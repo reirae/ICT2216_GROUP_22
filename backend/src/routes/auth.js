@@ -26,7 +26,6 @@ const IV_LENGTH = 16;
 
 // Anti-Replay Cache Registry
 const usedTokensCache = new Set();
-setInterval(() => usedTokensCache.clear(), 30000);
 
 // ====================================================================
 // CRYPTOGRAPHIC HELPER UTILITIES
@@ -322,6 +321,10 @@ router.post('/verify-otp', async (req, res) => {
   }
 
   usedTokensCache.add(replayCacheKey);
+  setTimeout(() => {
+    usedTokensCache.delete(replayCacheKey);
+  }, 60000); // Blocks this specific token for exactly 60 seconds
+  
   const userId = pendingUser.id;
 
   try {
