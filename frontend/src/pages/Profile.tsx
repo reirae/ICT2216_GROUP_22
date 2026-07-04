@@ -31,13 +31,16 @@ export default function Profile() {
 
   // --- UI Layout Controls ---
   const [isConfirmingDisable, setIsConfirmingDisable] = useState(false); // In-card confirmation block state
+  const [disableCode, setDisableCode] = useState('');
 
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [pwError, setPwError] = useState('');
   const [pwOk, setPwOk] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [isProfileBusy, setIsProfileBusy] = useState(false);
+  const [isPasswordBusy, setIsPasswordBusy] = useState(false);
+  const [isMfaBusy, setIsMfaBusy] = useState(false);
 
   // --- Dynamic Profile Edit Management States ---
   const [isEditing, setIsEditing] = useState(false);
@@ -107,16 +110,26 @@ export default function Profile() {
     }
   };
 
-  const handleDisable2FA = async () => {
-    setBusy(true);
+  const handleDisable2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (u.hasMfaEnabled === 1 && (!disableCode || disableCode.length !== 6)) {
+      setMfaError('Please enter a valid 6-digit verification code.');
+      return;
+    }
+
+    // Change setBusy(true) to this:
+    setIsMfaBusy(true); 
     try {
       setError('');
       setMfaSuccess('');
       setMfaError('');
 
-      const response = await api.post<{ message: string }>('/user/disable-2fa');
+      const response = await api.post<{ message: string }>('/user/disable-2fa', {
+        token: disableCode
+      });
       setMfaSuccess(response.message);
       setIsConfirmingDisable(false);
+      setDisableCode('');
 
       if (data?.user) {
         setData({ ...data, user: { ...data.user, hasMfaEnabled: 0 } });
@@ -124,7 +137,8 @@ export default function Profile() {
     } catch (e: any) {
       setMfaError(e.response?.data?.error || e.message || 'Failed to safely remove authentication parameters.');
     } finally {
-      setBusy(false);
+      // Change setBusy(false) to this:
+      setIsMfaBusy(false);
     }
   };
 
@@ -135,7 +149,9 @@ export default function Profile() {
     if (!PATTERNS.password.test(next))
       return setPwError('New password must be 8+ chars with upper, lower, digit, and symbol.');
     if (next !== confirm) return setPwError('New passwords do not match.');
-    setBusy(true);
+    
+    // Change setBusy(true) to this:
+    setIsPasswordBusy(true);
     try {
       await api.put('/user/password', { current_password: cur, new_password: next });
       setPwOk('Password updated.');
@@ -143,7 +159,8 @@ export default function Profile() {
     } catch (e: any) {
       setPwError(e.message);
     } finally {
-      setBusy(false);
+      // Change setBusy(false) to this:
+      setIsPasswordBusy(false);
     }
   };
 
@@ -153,7 +170,6 @@ export default function Profile() {
     setProfileError('');
     setProfileSuccess('');
 
-    // Local structural verification before network dispatch
     if (!PATTERNS.name.test(editForm.first_name) || !PATTERNS.name.test(editForm.last_name)) {
       return setProfileError('Names must start with letters and contain no special characters.');
     }
@@ -164,19 +180,20 @@ export default function Profile() {
       return setProfileError('Phone number must be exactly 8 digits long.');
     }
 
-    setBusy(true);
+    // Change setBusy(true) to this:
+    setIsProfileBusy(true);
     try {
       const response = await api.put<{ message: string }>('/user/profile', editForm);
       setProfileSuccess(response.message);
       setIsEditing(false);
 
-      // Refresh master view context safely from source row variables
       const updatedProfile = await api.get<ProfileData>('/user/profile');
       setData(updatedProfile);
     } catch (err: any) {
       setProfileError(err.response?.data?.error || err.message || 'Validation gate failed.');
     } finally {
-      setBusy(false);
+      // Change setBusy(false) to this:
+      setIsProfileBusy(false);
     }
   };
 
@@ -336,10 +353,10 @@ export default function Profile() {
 
               <button
                 type="submit"
-                disabled={busy}
+                disabled={isProfileBusy}
                 className="w-full mt-2 bg-blue-600 text-white text-sm py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-60"
               >
-                {busy ? 'Saving changes...' : 'Save Profile Changes'}
+                {isProfileBusy ? 'Saving changes...' : 'Save Profile Changes'}
               </button>
             </form>
           )}
@@ -353,8 +370,8 @@ export default function Profile() {
             <PwField label="Confirm New Password" value={confirm} onChange={setConfirm} />
             {pwError && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm">{pwError}</div>}
             {pwOk && <div className="bg-green-50 border border-green-300 text-green-700 px-4 py-3 rounded-lg text-sm">{pwOk}</div>}
-            <button type="submit" disabled={busy} className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60">
-              {busy ? 'Updating…' : 'Update Password'}
+            <button type="submit" disabled={isPasswordBusy} className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-60">
+              {isPasswordBusy ? 'Updating…' : 'Update Password'}
             </button>
           </form>
         </div>
@@ -422,9 +439,9 @@ export default function Profile() {
               </div>
             )}
 
-            {/* Custom Inline Warning Block (Replaces the ugly popup alert) */}
+            {/* Custom Inline Warning Block */}
             {isConfirmingDisable && (
-              <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg mb-4 animate-fade-in text-sm">
+              <form onSubmit={handleDisable2FA} className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg mb-4 animate-fade-in text-sm">
                 <div className="flex items-start gap-2 font-semibold mb-1 text-red-700">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
                   <span>DANGEROUS SECURITY DOWNGRADE</span>
@@ -432,24 +449,45 @@ export default function Profile() {
                 <p className="text-xs text-red-600 mb-3">
                   Disabling Two-Factor Authentication significantly lowers your security perimeter against credential theft and fraud vectors.
                 </p>
+
+                {/* Secure Challenge Input Node */}
+                {u.hasMfaEnabled === 1 && (
+                  <div className="mb-3 bg-white p-2.5 rounded border border-red-200 max-w-[240px]">
+                    <label className="block text-xs font-bold text-red-800 mb-1">
+                      Enter Authenticator Code to Confirm:
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      placeholder="000000"
+                      value={disableCode}
+                      onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, ''))}
+                      className="w-full text-center tracking-widest font-mono font-bold text-base p-1.5 border rounded focus:ring-2 focus:ring-red-500 bg-gray-50 text-gray-900 focus:outline-none"
+                      required
+                    />
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <button
-                    type="button"
-                    disabled={busy}
-                    onClick={handleDisable2FA}
-                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs rounded font-medium transition-colors"
+                    type="submit"
+                    disabled={isMfaBusy}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs rounded font-medium transition-colors disabled:opacity-60"
                   >
-                    Yes, Remove Protection
+                    {isMfaBusy ? 'Processing...' : 'Yes, Remove Protection'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setIsConfirmingDisable(false)}
+                    onClick={() => {
+                      setIsConfirmingDisable(false);
+                      setDisableCode('');
+                    }}
                     className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs rounded font-medium transition-colors"
                   >
                     Cancel
                   </button>
                 </div>
-              </div>
+              </form>
             )}
 
             {!qrCode && !isConfirmingDisable && (

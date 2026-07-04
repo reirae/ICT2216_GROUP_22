@@ -279,26 +279,6 @@ router.post('/verify-otp', async (req, res) => {
     const currentAttempts = (pendingUser.attempts || 0) + 1;
     await writeLog({ userId: pendingUser?.id || null, userRole: pendingUser?.role || 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
 
-    /*
-    if (req.session.otpAttempts >= 3) {
-      delete req.session.pendingUser;
-      delete req.session.otpAttempts;
-      return req.session.save((err) => {
-        if (err) return res.status(500).json({ error: 'Session save error' });
-        res.status(401).json({ error: 'Too many failed attempts. Please sign in again.' });
-      });
-    }
-
-    return req.session.save((err) => {
-      if (err) return res.status(500).json({ error: 'Session save error' });
-      res.status(401).json({ error: 'Invalid verification code.' });
-    });
-
-    usedTokensCache.add(replayCacheKey);
-
-    const user = req.session.pendingUser;
-    const userId = user.id;*/
-
     // Lockout function: Clears token context entirely after 3 failures
     if (currentAttempts >= 3) {
       return res.status(401).json({ 
@@ -466,18 +446,6 @@ async function handleLogin(req, res, role) {
     if (!match) {
       if (role === 'user') {
         const attempts = (account.failed_attempts || 0) + 1;
-        
-        /*if (attempts >= LOCK_THRESHOLD) {
-          await pool.execute(
-            `UPDATE users SET failed_attempts = ?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE ${idCol} = ?`,
-            [attempts, LOCK_MINUTES, account[idCol]]
-          );
-        } else {
-          await pool.execute(
-            `UPDATE users SET failed_attempts = ? WHERE ${idCol} = ?`,
-            [attempts, account[idCol]]
-          );
-        }*/
 
         const query = attempts >= LOCK_THRESHOLD
           ? `UPDATE users SET failed_attempts = ?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE ${idCol} = ?`
@@ -512,22 +480,6 @@ async function handleLogin(req, res, role) {
         encrypted_otp_secret: account.otp_secret,
         isSetupPending: isSetupPending
       });
-
-      /*
-      req.session.otpAttempts = 0;
-
-      return req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-
-        return res.status(202).json({
-          message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
-          requires2FA: true,
-          isSetupPending: isSetupPending
-        });
-      }); */
 
       return res.status(202).json({
         message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
