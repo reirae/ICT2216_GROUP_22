@@ -66,6 +66,9 @@
     ],
     "transform": {
       "^.+\\.(js|jsx|ts|tsx)$": "babel-jest"
+    },
+    "moduleNameMapper": {
+      "\\.tsx$": "<rootDir>/tests/__mocks__/emptyMock.js"
     }
   }
 }
