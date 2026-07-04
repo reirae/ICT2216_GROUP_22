@@ -1,7 +1,9 @@
 const crypto = require("crypto");
 const { render } = require("@react-email/render");
 const { transporter } = require("./mailer");
-const OtpEmail = require("../../dist/emails/OtpEmail").default;
+// ts-node lets us require .tsx files directly without a build step
+require("ts-node").register({ transpileOnly: true });
+const OtpEmail = require("../emails/OtpEmail").default;
 
 // TODO: Replace with Redis before going to production
 const otpStore = new Map();
