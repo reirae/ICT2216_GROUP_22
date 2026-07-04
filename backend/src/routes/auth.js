@@ -26,7 +26,6 @@ const IV_LENGTH = 16;
 
 // Anti-Replay Cache Registry
 const usedTokensCache = new Set();
-setInterval(() => usedTokensCache.clear(), 30000);
 
 // ====================================================================
 // CRYPTOGRAPHIC HELPER UTILITIES
@@ -51,6 +50,33 @@ function decryptSecret(text) {
   let decrypted = decipher.update(encrypted, 'hex', 'utf8');
   decipher.final('utf8'); // Complete cryptographic validation
   return decrypted;
+}
+
+// ====================================================================
+// STATELESS, TAMPER-PROOF MFA TOKEN
+// ====================================================================
+function generateMfaToken(payload) {
+  const tokenData = JSON.stringify({ attempts: 0, ...payload, exp: Date.now() + 5 * 60 * 1000 });
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(tokenData, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return `${iv.toString('hex')}:${encrypted}:${cipher.getAuthTag().toString('hex')}`;
+}
+
+function parseMfaToken(token) {
+  try {
+    const [ivHex, encrypted, tagHex] = token.split(':');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    const data = JSON.parse(decrypted);
+    if (Date.now() > data.exp) return null;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 function generateAccountNumber() {
@@ -224,23 +250,25 @@ router.post(
 );
 
 router.post('/verify-otp', async (req, res) => {
-  const { otp, tempSecret } = req.body;
+  const { otp, tempSecret , mfaToken} = req.body;
 
-  if (!req.session.pendingUser) {
+  const pendingUser = mfaToken ? parseMfaToken(mfaToken) : null;
+
+  if (!pendingUser) {
     await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
     return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
   
-  // FIXED: Decrypt the master secret from storage session frame safely at runtime evaluation loop
-  const activeSecret = req.session.pendingUser.isSetupPending
+  // Decrypt the master secret from storage session frame safely at runtime evaluation loop
+  const activeSecret = pendingUser.isSetupPending
     ? tempSecret
-    : decryptSecret(req.session.pendingUser.encrypted_otp_secret);
+    : decryptSecret(pendingUser.encrypted_otp_secret);
 
   if (!otp || !activeSecret) {
     return res.status(400).json({ error: 'Verification token parameters are missing.' });
   }
 
-  const replayCacheKey = `${req.session.pendingUser.id}:${otp}`;
+  const replayCacheKey = `${pendingUser.id}:${otp}`;
   if (usedTokensCache.has(replayCacheKey)) {
     return res.status(401).json({ error: 'This verification code has already been used. Please wait for a new token.' });
   }
@@ -248,33 +276,41 @@ router.post('/verify-otp', async (req, res) => {
   const isValid = verifyTOTP(otp, activeSecret);
 
   if (!isValid) {
-    req.session.otpAttempts = (req.session.otpAttempts || 0) + 1;
-    await writeLog({ userId: req.session.pendingUser?.id || null, userRole: req.session.pendingUser?.role || 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
+    const currentAttempts = (pendingUser.attempts || 0) + 1;
+    await writeLog({ userId: pendingUser?.id || null, userRole: pendingUser?.role || 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
 
-    if (req.session.otpAttempts >= 3) {
-      delete req.session.pendingUser;
-      delete req.session.otpAttempts;
-      return req.session.save((err) => {
-        if (err) return res.status(500).json({ error: 'Session save error' });
-        res.status(401).json({ error: 'Too many failed attempts. Please sign in again.' });
+    // Lockout function: Clears token context entirely after 3 failures
+    if (currentAttempts >= 3) {
+      return res.status(401).json({ 
+        error: 'Too many failed attempts. Please sign in again.',
+        clearMfaState: true // Flags frontend to wipe local MFA components
       });
     }
 
-    return req.session.save((err) => {
-      if (err) return res.status(500).json({ error: 'Session save error' });
-      res.status(401).json({ error: 'Invalid verification code.' });
+    // Generate an updated token containing the new attempt incrementation to pass back to frontend state
+    const updatedUserPayload = { ...pendingUser, attempts: currentAttempts };
+    delete updatedUserPayload.exp; // generateMfaToken sets a fresh lifespan window
+    const newMfaToken = generateMfaToken(updatedUserPayload);
+
+    return res.status(401).json({ 
+      error: 'Invalid verification code.',
+      attemptsRemaining: 3 - currentAttempts,
+      mfaToken: newMfaToken // Update token context in frontend state container
     });
+
   }
 
   usedTokensCache.add(replayCacheKey);
-
-  const user = req.session.pendingUser;
-  const userId = user.id;
+  setTimeout(() => {
+    usedTokensCache.delete(replayCacheKey);
+  }, 60000); // Blocks this specific token for exactly 60 seconds
+  
+  const userId = pendingUser.id;
 
   try {
-    if (user.isSetupPending) {
+    if (pendingUser.isSetupPending) {
       const encryptedSecret = encryptSecret(activeSecret);
-      const isAdminRow = user.role !== 'user';
+      const isAdminRow = pendingUser.role !== 'user';
       const targetTable = isAdminRow ? 'admins' : 'users';
       const targetIdColumn = isAdminRow ? 'admin_id' : 'user_id';
 
@@ -282,33 +318,41 @@ router.post('/verify-otp', async (req, res) => {
         `UPDATE ${targetTable} SET otp_secret = ?, otp_enabled = 1 WHERE ${targetIdColumn} = ?`,
         [encryptedSecret, userId]
       );
-      await writeLog({ userId, userRole: user.role, action: '2FA_SETUP', status: 'success', ipAddress: req.ip });
+      await writeLog({ userId, userRole: pendingUser.role, action: '2FA_SETUP', status: 'success', ipAddress: req.ip });
     }
 
-    delete user.encrypted_otp_secret; // Data Minimization removal before cookie compilation
-    delete user.isSetupPending;
+    // Prepare profile state for session injection
+    const finalUser = { ...pendingUser };
+    delete finalUser.encrypted_otp_secret;
+    delete finalUser.isSetupPending;
+    delete finalUser.attempts;
+    delete finalUser.exp;
 
     // Log LOGIN success now that credentials + TOTP are both verified
-    await writeLog({ userId, userRole: user.role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
+    await writeLog({ userId, userRole: finalUser.role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
 
     req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
 
-      req.session.user = user;
+      const tabSessionId = crypto.randomBytes(16).toString('hex');
+
+      req.session.user = finalUser;
+      req.session.tabSessionId = tabSessionId;
       req.session.createdAt = Date.now(); //SSM
       const csrfToken = ensureCsrfToken(req);
 
       // single active session per user: storing session id in the database
       // Get the fresh session ID from the regenerated session frame
       const newSessionId = req.sessionID; 
-      const isAdminRow = user.role !== 'user';
+      const isAdminRow = finalUser.role !== 'user';
       const targetTable = isAdminRow ? 'admins' : 'users';
       const targetIdColumn = isAdminRow ? 'admin_id' : 'user_id';
+      
       try {
         // Enforce single active session by updating the database record
         await pool.execute(
           `UPDATE ${targetTable} SET active_session_id = ? WHERE ${targetIdColumn} = ?`,
-          [newSessionId, user.id]
+          [newSessionId, finalUser.id]
         );
       } catch (dbErr) {
         console.error('Failed to update active session ID:', dbErr);
@@ -317,8 +361,8 @@ router.post('/verify-otp', async (req, res) => {
 
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
-        await writeLog({ userId: user.id, userRole: user.role, action: 'LOGIN_2FA', status: 'success', ipAddress: req.ip });
-        res.json({ user: req.session.user, csrfToken });
+        await writeLog({ userId: finalUser.id, userRole: finalUser.role, action: 'LOGIN_2FA', status: 'success', ipAddress: req.ip });
+        res.json({ user: req.session.user, csrfToken, tabSessionId });
       });
     });
   } catch (err) {
@@ -373,6 +417,8 @@ async function handleLogin(req, res, role) {
   const idCol = isAdminRow ? 'admin_id' : 'user_id';
 
   try {
+    let mfaToken = null;
+
     const [rows] = await pool.execute(
       `SELECT * FROM ${table} WHERE username = ? LIMIT 1`,
       [username]
@@ -400,17 +446,12 @@ async function handleLogin(req, res, role) {
     if (!match) {
       if (role === 'user') {
         const attempts = (account.failed_attempts || 0) + 1;
-        if (attempts >= LOCK_THRESHOLD) {
-          await pool.execute(
-            `UPDATE users SET failed_attempts = ?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE ${idCol} = ?`,
-            [attempts, LOCK_MINUTES, account[idCol]]
-          );
-        } else {
-          await pool.execute(
-            `UPDATE users SET failed_attempts = ? WHERE ${idCol} = ?`,
-            [attempts, account[idCol]]
-          );
-        }
+
+        const query = attempts >= LOCK_THRESHOLD
+          ? `UPDATE users SET failed_attempts = ?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE ${idCol} = ?`
+          : `UPDATE users SET failed_attempts = ? WHERE ${idCol} = ?`;
+        const params = attempts >= LOCK_THRESHOLD ? [attempts, LOCK_MINUTES, account[idCol]] : [attempts, account[idCol]];
+        await pool.execute(query, params);
       }
       await writeLog({ userId: account[idCol], userRole: account.role, action: 'LOGIN', status: 'failure', ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -428,7 +469,7 @@ async function handleLogin(req, res, role) {
     if (!hasDisabledMFA) {
       const isSetupPending = account.otp_secret === null;
 
-      req.session.pendingUser = {
+      mfaToken = generateMfaToken({
         id: String(account[idCol]),
         username: account.username,
         first_name: account.first_name || 'Admin',
@@ -438,21 +479,13 @@ async function handleLogin(req, res, role) {
         account_number: account.account_number || null,
         encrypted_otp_secret: account.otp_secret,
         isSetupPending: isSetupPending
-      };
+      });
 
-      req.session.otpAttempts = 0;
-
-      return req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-
-        return res.status(202).json({
-          message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
-          requires2FA: true,
-          isSetupPending: isSetupPending
-        });
+      return res.status(202).json({
+        message: isSetupPending ? 'Awaiting Mandatory 2FA Onboarding' : 'Awaiting Authenticator Challenge Code',
+        requires2FA: true,
+        isSetupPending: isSetupPending,
+        mfaToken: mfaToken
       });
     }
 
@@ -495,6 +528,26 @@ async function handleLogin(req, res, role) {
     res.status(500).json({ error: 'Login failed' });
   }
 }
+
+router.post('/generate-onboarding-2fa', async (req, res) => {
+  try {
+    const { mfaToken } = req.body;
+    const pendingUser = mfaToken ? parseMfaToken(mfaToken) : null;
+
+    if (!pendingUser || !pendingUser.isSetupPending) {
+      return res.status(403).json({ error: 'Access denied. Session parameters are out of bounds.' });
+    }
+
+    const { username } = pendingUser;
+    const secret = require('../utils/totp').generateSecret();
+    const qrCode = await require('../utils/totp').generateQRCode(username, secret);
+
+    res.json({ qrCode, tempSecret: secret });
+  } catch (err) {
+    console.error('[generate-onboarding-2fa]', err);
+    res.status(500).json({ error: 'Failed to safely generate onboarding security streams.' });
+  }
+});
 
 router.post('/check-email', async (req, res) => {
   const { email } = req.body;

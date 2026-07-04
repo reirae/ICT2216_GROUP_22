@@ -7,24 +7,14 @@ const ABSOLUTE_TIMEOUT_MS = 60 * 60 * 1000;
 function requireAuth(role) {
   return async (req, res, next) => {
     // 1. Basic active session verification
-if (!req.session || !req.session.user) {
-  // If a user is currently authenticating via MFA, let them proceed through the auth checkpoint
-  if (req.session && req.session.pendingUser) {
-    return res.status(403).json({ error: 'Multi-stage authentication sequence incomplete.' });
-  }
-  await writeLog({ userRole: 'anonymous', action: 'AUTH_REQUIRED', status: 'failure', ipAddress: req.ip });
-  return res.status(401).json({ error: 'Authentication required' });
-}
-
-    // 2. Prevent Multi-Stage 2FA Bypass Attacks
-    // Blocks requests if a user is still stuck in the middle of a login challenge step
-    if (req.session.pendingUser) {
-      return res.status(403).json({ error: 'Multi-stage authentication sequence incomplete.' });
+    if (!req.session || !req.session.user) {
+      await writeLog({ userRole: 'anonymous', action: 'AUTH_REQUIRED', status: 'failure', ipAddress: req.ip });
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
     const { id, role: userRole } = req.session.user;
     
-    // 3. Concurrent Session Hijacking Verification
+    // 2. Concurrent Session Hijacking Verification
     try {
       const isAdminRow = userRole !== 'user';
       const table = isAdminRow ? 'admins' : 'users';
@@ -48,7 +38,7 @@ if (!req.session || !req.session.user) {
       return res.status(500).json({ error: 'Internal server safety verification failed.' });
     }
 
-    // 4. Absolute Timeout Verification
+    // 3. Absolute Timeout Verification
     const sessionAge = Date.now() - (req.session.createdAt || 0);
     if (sessionAge > ABSOLUTE_TIMEOUT_MS) {
       return req.session.destroy(async (err) => {
@@ -58,7 +48,7 @@ if (!req.session || !req.session.user) {
       });
     }
 
-    // 5. Role-based access control verification
+    // 4. Role-based access control verification
     if (role && req.session.user.role !== role) {
       await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'AUTH_REQUIRED', status: 'failure', ipAddress: req.ip });
       return res.status(403).json({ error: 'Forbidden' });
