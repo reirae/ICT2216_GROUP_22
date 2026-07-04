@@ -250,6 +250,7 @@ export default function AdminLogin() {
                   setRequires2FA(false);
                   setIsOnboarding(false);
                   setShowQR(false);
+                  setMfaToken(null);
                   setQrCode('');
                   setTempSecret('');
                   setOtp('');
