@@ -95,63 +95,6 @@ router.post(
   }
 );
 
-// Update user profile details only — status changes use PUT /users/:id/status
-router.put(
-  '/users/:id',
-  requireAuth(),
-  requireAdminRole(['business_admin']),
-  [
-    body('first_name').optional().matches(PATTERNS.name),
-    body('last_name').optional().matches(PATTERNS.name),
-    body('email').optional().matches(PATTERNS.email),
-    body('phone_number').optional({ checkFalsy: true }).matches(PATTERNS.phone),
-  ],
-  handleValidation,
-  async (req, res) => {
-    const idStr = req.params.id;
-
-    if (!/^\d+$/.test(idStr)) {
-      return res.status(400).json({ error: 'Invalid user ID format.' });
-    }
-
-    // Reject any attempt to change status through this endpoint
-    if (req.body.status !== undefined) {
-      return res.status(400).json({ error: 'Status changes must use PUT /admin/users/:id/status.' });
-    }
-
-    // Confirm the user exists before building the update
-    const [[target]] = await pool.execute('SELECT user_id FROM users WHERE user_id = ?', [idStr]);
-    if (!target) return res.status(404).json({ error: `User with ID ${idStr} not found.` });
-
-    const allowed = ['first_name', 'last_name', 'email', 'phone_number'];
-    const fields = [];
-    const values = [];
-
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) {
-        fields.push(`${key} = ?`);
-        values.push(req.body[key]);
-      }
-    }
-
-    if (!fields.length) return res.status(400).json({ error: 'No fields to update.' });
-
-    values.push(idStr);
-
-    try {
-      const query = `UPDATE users SET ${fields.join(', ')} WHERE user_id = ?`;
-      await pool.execute(query, values);
-
-      await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'USER_UPDATE', status: 'success', ipAddress: req.ip });
-      return res.json({ message: 'User updated successfully' });
-    } catch (err) {
-      console.error('[admin-users-update]', err);
-      await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'USER_UPDATE', status: 'failure', ipAddress: req.ip });
-      res.status(500).json({ error: 'Failed to update user' });
-    }
-  }
-);
-
 // Update user status only (Business Admin) — separated from profile edits for auditability
 router.put(
   '/users/:id/status',
