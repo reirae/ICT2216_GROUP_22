@@ -9,6 +9,8 @@ const compression = require('compression');
 
 const { generalLimiter } = require('./middleware/rateLimiter');
 const { verifyCsrfToken } = require('./middleware/csrf');
+const { validateSessionPathContext } = require('./middleware/validation');
+
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const adminRoutes = require('./routes/admin');
@@ -38,6 +40,8 @@ app.use(session({
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging',
     maxAge: Number(process.env.SESSION_MAX_AGE_MS || 15 * 60 * 1000),
+    // Only restrict path and domain if explicitly deployed to production/staging
+    // Keeps local development working flawlessly on localhost/127.0.0.1
     ...(process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging'
       ? { path: '/api', domain: process.env.COOKIE_DOMAIN }
       : {}
@@ -51,6 +55,9 @@ app.use(generalLimiter);
 // state-changing request (see middleware/csrf.js for the exemption
 // list covering pre-authentication endpoints).
 app.use(verifyCsrfToken);
+
+// Backend Session Gatekeeper: Intercepts multi-tab session switching/cross-pollination
+app.use(validateSessionPathContext);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);

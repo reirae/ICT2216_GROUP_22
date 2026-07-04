@@ -48,6 +48,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
+    // Cross-Tab/Switched Multi-Session Synchronization Check:
+    // Fire a notification listener to clear global authentication state variables instantly
+    if (res.status === 401) {
+      window.dispatchEvent(new Event('auth-unauthorized'));
+    }
+
     const err = new Error(
       (data && (data.error || data.message)) || `Request failed (${res.status})`
     ) as ApiError;

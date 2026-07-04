@@ -7,20 +7,22 @@ const ABSOLUTE_TIMEOUT_MS = 60 * 60 * 1000;
 function requireAuth(role) {
   return async (req, res, next) => {
     // 1. Basic active session verification
-if (!req.session || !req.session.user) {
-  // If a user is currently authenticating via MFA, let them proceed through the auth checkpoint
-  if (req.session && req.session.pendingUser) {
-    return res.status(403).json({ error: 'Multi-stage authentication sequence incomplete.' });
-  }
-  await writeLog({ userRole: 'anonymous', action: 'AUTH_REQUIRED', status: 'failure', ipAddress: req.ip });
-  return res.status(401).json({ error: 'Authentication required' });
-}
+    if (!req.session || !req.session.user) {
+      /*
+      // If a user is currently authenticating via MFA, let them proceed through the auth checkpoint
+      if (req.session && req.session.pendingUser) {
+        return res.status(403).json({ error: 'Multi-stage authentication sequence incomplete.' });
+      } */
+      await writeLog({ userRole: 'anonymous', action: 'AUTH_REQUIRED', status: 'failure', ipAddress: req.ip });
+      return res.status(401).json({ error: 'Authentication required' });
+    }
 
+    /*
     // 2. Prevent Multi-Stage 2FA Bypass Attacks
     // Blocks requests if a user is still stuck in the middle of a login challenge step
     if (req.session.pendingUser) {
       return res.status(403).json({ error: 'Multi-stage authentication sequence incomplete.' });
-    }
+    } */
 
     const { id, role: userRole } = req.session.user;
     

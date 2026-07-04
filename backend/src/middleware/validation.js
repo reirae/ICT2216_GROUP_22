@@ -61,4 +61,59 @@ async function verifyCaptcha(req, res, next) {
   }
 }
 
-module.exports = { PATTERNS, handleValidation, verifyCaptcha };
+// Catches cross-pollinated or switched session cookies at the server layer.
+function validateSessionPathContext(req, res, next) {
+  const currentPath = req.originalUrl || req.url;
+
+  if (currentPath.startsWith('/api/auth')) {
+    return next();
+  }
+
+  // 1. If no session user exists, let requireAuth middleware handle standard 401 routing
+  if (!req.session || !req.session.user) {
+    return next();
+  }
+  
+  const isApiAdminRoute = currentPath.startsWith('/api/admin');
+  
+  const rawRole = req.session.user.role || '';
+  const usernameLower = (req.session.user.username || '').toLowerCase();
+
+  // 2. Normalize administrative classifications
+  let effectiveRole = rawRole;
+  if (rawRole === 'admin') {
+    if (usernameLower.includes('bus') || usernameLower.includes('business')) {
+      effectiveRole = 'business_admin';
+    } else {
+      effectiveRole = 'it_admin';
+    }
+  }
+
+  const isAdminGroup = effectiveRole === 'business_admin' || effectiveRole === 'it_admin';
+
+  // 3. SECURE CROSS-POLLINATION GATE:
+  // Threat Vector A: An admin profile tries to trigger regular customer user routes
+  // Threat Vector B: A regular customer cookie tries to fetch admin control endpoints
+  const isCrossPollinatedSession = 
+    (isApiAdminRoute && !isAdminGroup) || 
+    (!isApiAdminRoute && currentPath.startsWith('/api/user') && effectiveRole !== 'user');
+
+  if (isCrossPollinatedSession) {
+    // Force complete server-side destruction of the mismatched session context
+    return req.session.destroy((err) => {
+      res.clearCookie(process.env.SESSION_COOKIE_NAME || 'securebank.sid');
+      return res.status(401).json({ 
+        error: 'Session context integrity invalid. Switched session detected.' 
+      });
+    });
+  }
+
+  next();
+}
+
+module.exports = { 
+  PATTERNS, 
+  handleValidation, 
+  verifyCaptcha, 
+  validateSessionPathContext // Export the new validation handler
+};

@@ -39,7 +39,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { 
+    refresh(); 
+    
+    const handleUnauthorized = () => {
+      setUser(null);
+    }; 
+    
+    window.addEventListener('auth-unauthorized', handleUnauthorized);
+
+    return () => {
+      window.removeEventListener('auth-unauthorized', handleUnauthorized);
+    };
+  }, [refresh]);
 
   const login = useCallback(
     async (role: 'user' | 'admin', body: { username: string; password: string; captcha: string }) => {
