@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!--
+    ssh2 1.17.0 is used only by scripts/sshTunnel.js for developer database
+    access. It is currently the latest npm release, so no patched version is
+    available. Keep this exception narrow and temporary; OWASP will enforce it
+    again after the expiry date unless the dependency is upgraded or reviewed.
+  -->
+  <suppress until="2026-10-05Z">
+    <notes><![CDATA[
+      Temporary exception for CVE-2025-70034. The affected package is a
+      development-only SSH client and is not installed in production.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:npm/ssh2@1\.17\.0$</packageUrl>
+    <cve>CVE-2025-70034</cve>
+  </suppress>
+</suppressions>
