@@ -92,65 +92,26 @@ jobs:
   security:
     name: OWASP Dependency-Check
     runs-on: ubuntu-latest
-    env:
-      DEPENDENCY_CHECK_VERSION: 12.2.2
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # The Node.js analyzers use npm when inspecting package-lock.json files.
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Set dependency database cache key
-        id: dependency-check-cache-key
-        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache OWASP vulnerability database
-        uses: actions/cache@v4
-        with:
-          path: ~/.dependency-check/data
-          key: dependency-check-${{ runner.os }}-${{ env.DEPENDENCY_CHECK_VERSION }}-${{ steps.dependency-check-cache-key.outputs.date }}
-          restore-keys: |
-            dependency-check-${{ runner.os }}-${{ env.DEPENDENCY_CHECK_VERSION }}-
-
-      - name: Install OWASP Dependency-Check
-        run: |
-          curl --fail --location --silent --show-error \
-            "https://github.com/dependency-check/DependencyCheck/releases/download/v${DEPENDENCY_CHECK_VERSION}/dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip" \
-            --output dependency-check.zip
-          unzip -q dependency-check.zip
-          rm dependency-check.zip
-
+      # This official Dependency-Check organization image is rebuilt nightly
+      # with the NVD database already populated, avoiding NVD API rate limits.
       - name: Run OWASP Dependency-Check
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: |
-          args=(
-            --project "SecureBank"
-            --scan "${GITHUB_WORKSPACE}/backend/package-lock.json"
-            --scan "${GITHUB_WORKSPACE}/frontend/package-lock.json"
-            --suppression "${GITHUB_WORKSPACE}/security/dependency-check-suppression.xml"
+        uses: dependency-check/Dependency-Check_Action@1e54355a8b4c8abaa8cc7d0b70aa655a3bb15a6c
+        with:
+          project: SecureBank
+          path: backend/package-lock.json
+          format: ALL
+          out: dependency-check-reports
+          args: >-
+            --scan /github/workspace/frontend/package-lock.json
+            --suppression /github/workspace/security/dependency-check-suppression.xml
             --disableAssembly
             --disableYarnAudit
             --disableOssIndex
-            --format ALL
-            --out "${GITHUB_WORKSPACE}/dependency-check-reports"
-            --data "$HOME/.dependency-check/data"
             --failOnCVSS 7
-          )
-          if [ -n "$NVD_API_KEY" ]; then
-            args+=(--nvdApiKey "$NVD_API_KEY")
-          fi
-          ./dependency-check/bin/dependency-check.sh "${args[@]}"
 
       - name: Upload OWASP reports
         if: always()
