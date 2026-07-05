@@ -60,7 +60,7 @@ app.use(verifyCsrfToken);
 app.use(validateSessionPathContext);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authRoutes.router);
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 
