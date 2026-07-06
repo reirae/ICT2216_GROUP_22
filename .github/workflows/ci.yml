@@ -97,17 +97,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install dependencies for analysis
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend --legacy-peer-deps
+
       # This official Dependency-Check organization image is rebuilt nightly
       # with the NVD database already populated, avoiding NVD API rate limits.
       - name: Run OWASP Dependency-Check
         uses: dependency-check/Dependency-Check_Action@1e54355a8b4c8abaa8cc7d0b70aa655a3bb15a6c
         with:
           project: SecureBank
-          path: backend/package-lock.json
+          path: .
           format: ALL
           out: dependency-check-reports
           args: >-
-            --scan /github/workspace/frontend/package-lock.json
             --suppression /github/workspace/security/dependency-check-suppression.xml
             --disableAssembly
             --disableYarnAudit
