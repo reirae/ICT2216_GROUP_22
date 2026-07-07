@@ -180,7 +180,7 @@ jobs:
           mkdir -p release/backend
           cp -R backend/src release/backend/src
           cp -R backend/dist release/backend/dist
-          cp backend/package.json backend/package-lock.json release/backend/
+          cp backend/package.json backend/package-lock.json backend/tsconfig.json release/backend/
           tar -C release -czf securebank-${GITHUB_SHA}.tar.gz .
 
       - name: Configure SSH
