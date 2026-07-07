@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, XCircle, Filter, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import { Search, XCircle, Filter, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { PATTERNS, formatMoney } from '../../utils/format';
 import PageLoader from '../../components/PageLoader';
@@ -17,11 +17,6 @@ interface AdminUser {
 }
 
 const blank = { first_name: '', last_name: '', email: '', phone_number: '', username: '', password: '' };
-type BalanceOperation = 'deposit' | 'withdrawal';
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'An unexpected error occurred';
-}
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -32,10 +27,6 @@ export default function AdminUsers() {
   const [form, setForm] = useState({ ...blank });
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [adjustment, setAdjustment] = useState<{ user: AdminUser; operation: BalanceOperation } | null>(null);
-  const [amount, setAmount] = useState('');
-  const [adjustmentError, setAdjustmentError] = useState('');
-  const [adjusting, setAdjusting] = useState(false);
 
   const load = () =>
     api.get<{ users: AdminUser[] }>('/admin/users')
@@ -63,7 +54,7 @@ export default function AdminUsers() {
 
   const setStatus = async (id: number, status: AdminUser['status']) => {
     try { await api.put(`/admin/users/${id}/status`, { status }); await load(); }
-    catch (e: unknown) { setError(errorMessage(e)); }
+    catch (e: any) { setError(e.message); }
   };
 
   const submitCreate = async (e: React.FormEvent) => {
@@ -84,49 +75,8 @@ export default function AdminUsers() {
       setShowAdd(false);
       setForm({ ...blank });
       await load();
-    } catch (e: unknown) {
-      setFormError(errorMessage(e));
-    }
-  };
-
-  const openAdjustment = (user: AdminUser, operation: BalanceOperation) => {
-    setAdjustment({ user, operation });
-    setAmount('');
-    setAdjustmentError('');
-  };
-
-  const closeAdjustment = () => {
-    if (adjusting) return;
-    setAdjustment(null);
-    setAmount('');
-    setAdjustmentError('');
-  };
-
-  const submitAdjustment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adjustment) return;
-    setAdjustmentError('');
-
-    if (!/^\d{1,13}(\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) {
-      return setAdjustmentError('Enter an amount greater than zero with at most two decimal places.');
-    }
-    if (adjustment.operation === 'withdrawal' && Number(amount) > Number(adjustment.user.balance)) {
-      return setAdjustmentError('The customer has insufficient balance for this withdrawal.');
-    }
-
-    setAdjusting(true);
-    try {
-      await api.post(`/admin/users/${adjustment.user.user_id}/balance-adjustment`, {
-        operation: adjustment.operation,
-        amount,
-      });
-      await load();
-      setAdjustment(null);
-      setAmount('');
-    } catch (e: unknown) {
-      setAdjustmentError(errorMessage(e));
-    } finally {
-      setAdjusting(false);
+    } catch (e: any) {
+      setFormError(e.message);
     }
   };
 
@@ -227,34 +177,15 @@ export default function AdminUsers() {
                     }`}>{u.status}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openAdjustment(u, 'deposit')}
-                        disabled={u.status !== 'active'}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded text-sm bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <ArrowDownToLine className="w-4 h-4" /> Deposit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openAdjustment(u, 'withdrawal')}
-                        disabled={u.status !== 'active'}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded text-sm bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <ArrowUpFromLine className="w-4 h-4" /> Withdraw
-                      </button>
-                      <select
-                        aria-label={`Change status for ${u.first_name} ${u.last_name}`}
-                        value={u.status}
-                        onChange={(e) => setStatus(u.user_id, e.target.value as AdminUser['status'])}
-                        className="px-3 py-1 border border-gray-300 rounded text-sm"
-                      >
-                        <option value="active">Active</option>
-                        <option value="suspended">Suspended</option>
-                        <option value="deactivated">Deactivated</option>
-                      </select>
-                    </div>
+                    <select
+                      value={u.status}
+                      onChange={(e) => setStatus(u.user_id, e.target.value as AdminUser['status'])}
+                      className="px-3 py-1 border border-gray-300 rounded text-sm"
+                    >
+                      <option value="active">Active</option>
+                      <option value="suspended">Suspended</option>
+                      <option value="deactivated">Deactivated</option>
+                    </select>
                   </td>
                 </tr>
               ))}
@@ -292,76 +223,9 @@ export default function AdminUsers() {
               <option value="suspended">Suspended</option>
               <option value="deactivated">Deactivated</option>
             </select>
-            <div className="grid grid-cols-2 gap-2 mt-3">
-              <button
-                type="button"
-                onClick={() => openAdjustment(u, 'deposit')}
-                disabled={u.status !== 'active'}
-                className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-sm bg-green-100 text-green-700 disabled:opacity-40"
-              >
-                <ArrowDownToLine className="w-4 h-4" /> Deposit
-              </button>
-              <button
-                type="button"
-                onClick={() => openAdjustment(u, 'withdrawal')}
-                disabled={u.status !== 'active'}
-                className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-sm bg-red-100 text-red-700 disabled:opacity-40"
-              >
-                <ArrowUpFromLine className="w-4 h-4" /> Withdraw
-              </button>
-            </div>
           </div>
         ))}
       </div>
-
-      {adjustment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="balance-adjustment-title">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <h2 id="balance-adjustment-title" className="text-xl text-gray-800">
-              {adjustment.operation === 'deposit' ? 'Deposit Funds' : 'Withdraw Funds'}
-            </h2>
-            <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
-              <p className="font-medium">{adjustment.user.first_name} {adjustment.user.last_name}</p>
-              <p className="font-mono text-gray-500">Account: {adjustment.user.account_number}</p>
-              <p className="mt-1">Current balance: {formatMoney(adjustment.user.balance)}</p>
-            </div>
-
-            <form onSubmit={submitAdjustment} className="mt-4">
-              <label htmlFor="adjustment-amount" className="block text-sm text-gray-700 mb-1">Amount</label>
-              <input
-                id="adjustment-amount"
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                maxLength={16}
-                autoFocus
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="mt-1 text-xs text-gray-500">Enter a positive amount with no more than two decimal places.</p>
-
-              {adjustmentError && (
-                <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{adjustmentError}</div>
-              )}
-
-              <div className="mt-5 flex gap-3">
-                <button
-                  type="submit"
-                  disabled={adjusting}
-                  className={`flex-1 rounded-lg py-2 text-white disabled:opacity-60 ${adjustment.operation === 'deposit' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
-                >
-                  {adjusting ? 'Processing...' : adjustment.operation === 'deposit' ? 'Confirm Deposit' : 'Confirm Withdrawal'}
-                </button>
-                <button type="button" onClick={closeAdjustment} disabled={adjusting} className="flex-1 rounded-lg bg-gray-200 py-2 text-gray-700 hover:bg-gray-300 disabled:opacity-60">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
