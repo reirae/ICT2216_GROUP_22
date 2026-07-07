@@ -673,4 +673,4 @@ router.post('/generate-onboarding-2fa', async (req, res) => {
   }
 });
 
-module.exports = {handleLogin, router};
+module.exports = {handleLogin, router, generateMfaToken, parseMfaToken};
