@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, setCsrfToken } from '../api/client';
+import { setTabSessionId } from '../api/client';
 
 export interface SessionUser {
   id: number;
@@ -39,7 +40,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { 
+    refresh(); 
+    
+    const handleUnauthorized = () => {
+      setUser(null);
+    }; 
+    
+    window.addEventListener('auth-unauthorized', handleUnauthorized);
+
+    return () => {
+      window.removeEventListener('auth-unauthorized', handleUnauthorized);
+    };
+  }, [refresh]);
 
   const login = useCallback(
     async (role: 'user' | 'admin', body: { username: string; password: string; captcha: string }) => {
@@ -57,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout'); } catch { /* ignore */ }
     setCsrfToken(null);
+    setTabSessionId(null);
     setUser(null);
   }, []);
 

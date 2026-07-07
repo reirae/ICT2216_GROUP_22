@@ -23,6 +23,7 @@ export default function AdminLogin() {
   const [tempSecret, setTempSecret] = useState('');         
   const [qrCode, setQrCode] = useState('');                 
   const [otp, setOtp] = useState('');
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
 
   const resetTurnstile = () => {
     turnstileRef.current?.reset();
@@ -33,7 +34,7 @@ export default function AdminLogin() {
     setError('');
     setBusy(true);
     try {
-      const setupRes = await api.post<{ qrCode: string; tempSecret: string }>('/auth/generate-onboarding-2fa');
+      const setupRes = await api.post<{ qrCode: string; tempSecret: string }>('/auth/generate-onboarding-2fa', { mfaToken });
       setQrCode(setupRes.qrCode);
       setTempSecret(setupRes.tempSecret);
       setShowQR(true);
@@ -64,6 +65,7 @@ export default function AdminLogin() {
         const response = await login('admin', { username, password, captcha });
 
         if (response && response.requires2FA) {
+          setMfaToken(response.mfaToken);
           if (response.isSetupPending) {
             setIsOnboarding(true); 
           } else {
@@ -93,6 +95,7 @@ export default function AdminLogin() {
       try {
         const verifyRes = await api.post<{ user?: { role: string } }>('/auth/verify-otp', { 
           otp, 
+          mfaToken,
           tempSecret: isOnboarding ? tempSecret : undefined 
         });
 
@@ -100,7 +103,25 @@ export default function AdminLogin() {
         const detectedRole = verifyRes?.user?.role as string || 'admin';
         window.location.href = getTargetRoute(detectedRole, username);
       } catch (err: any) {
-        setError(err.response?.data?.error || err.message || 'Invalid verification code.');
+        const details = err.details || {};
+        if (details.clearMfaState) {
+          setRequires2FA(false);
+          setIsOnboarding(false);
+          setShowQR(false);
+          setMfaToken(null);
+          setQrCode('');
+          setTempSecret('');
+          setOtp('');
+          setUsername('');
+          setPassword('');
+          resetTurnstile();
+          setError(err.message || 'Another account has been signed in. Please sign in again.');
+        } else if (details.mfaToken) {
+          setMfaToken(details.mfaToken);
+          setError(`${err.message} (${details.attemptsRemaining} attempts remaining)`);
+        } else {
+          setError(err.response?.data?.error || err.message || 'Invalid verification code.');
+        }
       } finally {
         setBusy(false);
       }
@@ -229,6 +250,7 @@ export default function AdminLogin() {
                   setRequires2FA(false);
                   setIsOnboarding(false);
                   setShowQR(false);
+                  setMfaToken(null);
                   setQrCode('');
                   setTempSecret('');
                   setOtp('');

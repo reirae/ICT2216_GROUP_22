@@ -38,11 +38,11 @@
     "qrcode": "^1.5.4",
     "react-email": "^6.1.5",
     "speakeasy": "^2.0.0",
-    "twilio": "^6.0.2",
-    "typescript": "^6.0.3"
+    "twilio": "^6.0.2"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@babel/preset-env": "^7.29.7",
     "@babel/preset-react": "^7.24.0",
     "@babel/preset-typescript": "^7.24.0",
     "@eslint/js": "^9.13.0",
@@ -67,6 +67,9 @@
     ],
     "transform": {
       "^.+\\.(js|jsx|ts|tsx)$": "babel-jest"
+    },
+    "moduleNameMapper": {
+      "\\.tsx$": "<rootDir>/tests/__mocks__/emptyMock.js"
     }
   }
 }

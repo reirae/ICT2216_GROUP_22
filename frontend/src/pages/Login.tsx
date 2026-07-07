@@ -25,6 +25,7 @@ export default function Login() {
   const [tempSecret, setTempSecret] = useState('');         
   const [qrCode, setQrCode] = useState('');                 
   const [otp, setOtp] = useState('');
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
 
   const resetTurnstile = () => {
     turnstileRef.current?.reset(); 
@@ -36,7 +37,7 @@ export default function Login() {
     setBusy(true);
     try {
       // Calls our public auth onboarding route to bypass the cookie session lock
-      const setupRes = await api.post<{ qrCode: string; tempSecret: string }>('/auth/generate-onboarding-2fa');
+      const setupRes = await api.post<{ qrCode: string; tempSecret: string }>('/auth/generate-onboarding-2fa', { mfaToken });
       setQrCode(setupRes.qrCode);
       setTempSecret(setupRes.tempSecret);
       setShowQR(true);
@@ -66,6 +67,8 @@ export default function Login() {
         const response = await login('user', { username, password, captcha });
 
         if (response && response.requires2FA) {
+          // Save the secure token passed by the server's response body
+          setMfaToken(response.mfaToken);
           if (response.isSetupPending) {
             // Secure by Default: Land on the onboarding page entry, but KEEP QR hidden!
             setIsOnboarding(true);
@@ -98,12 +101,31 @@ export default function Login() {
       try {
         await api.post('/auth/verify-otp', { 
           otp, 
+          mfaToken,
           tempSecret: isOnboarding ? tempSecret : undefined 
         });
         
         window.location.href = '/dashboard';
       } catch (err: any) {
-        setError(err.response?.data?.error || err.message || 'Invalid verification code. Please try again.');
+        const details = err.details || {};
+        if (details.clearMfaState) {
+          setRequires2FA(false);
+          setIsOnboarding(false);
+          setShowQR(false);
+          setMfaToken(null);
+          setQrCode('');
+          setTempSecret('');
+          setOtp('');
+          setUsername('');
+          setPassword('');
+          resetTurnstile();
+          setError(err.message || 'Another account has been signed in. Please sign in again.');
+        } else if (details.mfaToken) {
+          setMfaToken(details.mfaToken); // Update to new token data string
+          setError(`${err.message} (${details.attemptsRemaining} attempts remaining)`);
+        } else {
+          setError(err.response?.data?.error || err.message || 'Invalid verification code. Please try again.');
+        }
       } finally {
         setBusy(false);
       }
@@ -246,6 +268,7 @@ export default function Login() {
                   setRequires2FA(false);
                   setIsOnboarding(false);
                   setShowQR(false);
+                  setMfaToken(null);
                   setQrCode('');
                   setTempSecret('');
                   setOtp('');

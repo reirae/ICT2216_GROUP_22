@@ -29,7 +29,6 @@ function encryptSecret(text) {
 
 // Anti-Replay Cache Registry for Settings Onboarding Flow
 const profileReplayCache = new Set();
-setInterval(() => profileReplayCache.clear(), 30000);
 
 // Dashboard summary: balance + recent transactions.
 router.get('/dashboard', requireAuth('user'), async (req, res) => {
@@ -109,6 +108,9 @@ router.post('/verify-and-activate-2fa', requireAuth('user'), async (req, res) =>
     }
 
     profileReplayCache.add(replayCacheKey);
+    setTimeout(() => {
+      profileReplayCache.delete(replayCacheKey);
+    }, 60000);
 
     const encryptedSecret = encryptSecret(tempSecret);
 
@@ -361,7 +363,33 @@ router.post(
 // Disable Multi-Factor Opt-Out Route
 router.post('/disable-2fa', requireAuth('user'), async (req, res) => {
   const userId = req.session.user.id;
+  const { token } = req.body;
+
   try {
+    // 1. Fetch user's security configuration parameters
+    const [[account]] = await pool.execute(
+      'SELECT otp_secret, otp_enabled FROM users WHERE user_id = ? LIMIT 1',
+      [userId]
+    );
+
+    // 2. Step-Up Check: If MFA is active, require token confirmation
+    if (account && account.otp_enabled === 1) {
+      if (!token || token.length !== 6) {
+        await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'failure', ipAddress: req.ip });
+        return res.status(400).json({ error: 'Security challenge verification token is required to disable 2FA.' });
+      }
+
+      const plainSecret = account.otp_secret ? decryptSecret(account.otp_secret) : null;
+      if (plainSecret) {
+        const isValid = verifyTOTP(token, plainSecret);
+        if (!isValid) {
+          await writeLog({ userId, userRole: 'user', action: '2FA_DISABLE', status: 'failure', ipAddress: req.ip });
+          return res.status(400).json({ error: 'Security token mismatch. Action request rejected.' });
+        }
+      }
+    }
+
+    // 3. Securely wipe authentication settings once verified
     await pool.execute(
       'UPDATE users SET otp_secret = NULL, otp_enabled = 0 WHERE user_id = ?',
       [userId]
@@ -409,7 +437,7 @@ router.put(
           const isValid = verifyTOTP(token, plainSecret);
           if (!isValid) {
             await writeLog({ userId, userRole: 'user', action: 'PROFILE_UPDATE', status: 'failure', ipAddress: req.ip });
-            return res.status(401).json({ error: 'Security token mismatch. Alteration request rejected.' });
+            return res.status(400).json({ error: 'Security token mismatch. Alteration request rejected.' });
           }
         }
       }
