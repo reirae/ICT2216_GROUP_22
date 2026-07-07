@@ -1,13 +1,14 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { body } = require('express-validator');
-const { pool } = require('../config/database');
+const { pool, runTransaction } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { writeLog } = require('../utils/logger');
 const { handleValidation, PATTERNS } = require('../middleware/validation');
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
+const MAX_BALANCE_ADJUSTMENT = 9999999999999.99;
 
 // Helper middleware to verify specific admin sub-roles
 const requireAdminRole = (allowedRoles) => {
@@ -124,6 +125,120 @@ router.put(
       console.error('[admin-users-status]', err);
       await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'USER_STATUS_CHANGE', status: 'failure', ipAddress: req.ip });
       res.status(500).json({ error: 'Failed to update user status' });
+    }
+  }
+);
+
+// Deposit into or withdraw from a customer's account (Business Admin).
+// The balance update and matching history row are committed atomically.
+router.post(
+  '/users/:id/balance-adjustment',
+  requireAuth(),
+  requireAdminRole(['business_admin']),
+  [
+    body('operation')
+      .isIn(['deposit', 'withdrawal'])
+      .withMessage('Operation must be deposit or withdrawal'),
+    body('amount')
+      .custom((value) => {
+        const raw = typeof value === 'number' ? value.toString() : value;
+        return typeof raw === 'string' && PATTERNS.amount.test(raw);
+      })
+      .withMessage('Amount must be a positive number with at most two decimal places')
+      .custom((value) => Number(value) > 0 && Number(value) <= MAX_BALANCE_ADJUSTMENT)
+      .withMessage(`Amount must be between 0.01 and ${MAX_BALANCE_ADJUSTMENT}`),
+  ],
+  handleValidation,
+  async (req, res) => {
+    const targetId = req.params.id;
+    const adminId = req.session.user.id;
+    const adminRole = req.session.user.role;
+    const operation = req.body.operation;
+    // Preserve the validated decimal string for exact DECIMAL arithmetic in MySQL.
+    const rawAmount = typeof req.body.amount === 'number'
+      ? req.body.amount.toString()
+      : req.body.amount;
+
+    if (!/^\d+$/.test(targetId)) {
+      return res.status(400).json({ error: 'Invalid user ID format.' });
+    }
+
+    const [wholePart, fractionalPart = ''] = rawAmount.split('.');
+    const amount = `${wholePart.replace(/^0+(?=\d)/, '')}.${fractionalPart.padEnd(2, '0')}`;
+    const auditAction = operation === 'deposit'
+      ? `ADMIN_DEPOSIT $${amount} TO ${targetId}`
+      : `ADMIN_WITHDRAWAL $${amount} FROM ${targetId}`;
+
+    try {
+      const result = await runTransaction(async (conn) => {
+        const [[customer]] = await conn.execute(
+          'SELECT user_id, balance, status FROM users WHERE user_id = ? FOR UPDATE',
+          [targetId]
+        );
+
+        if (!customer) {
+          throw { status: 404, json: { error: 'Customer not found' } };
+        }
+        if (customer.status !== 'active') {
+          throw { status: 403, json: { error: 'Balance adjustments require an active customer account' } };
+        }
+
+        if (operation === 'withdrawal') {
+          // The balance predicate is a second line of defence against overdrafts.
+          const [update] = await conn.execute(
+            'UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
+            [amount, targetId, amount]
+          );
+          if (update.affectedRows !== 1) {
+            throw { status: 400, json: { error: 'Insufficient balance' } };
+          }
+        } else {
+          await conn.execute(
+            'UPDATE users SET balance = balance + ? WHERE user_id = ?',
+            [amount, targetId]
+          );
+        }
+
+        const signedAmount = operation === 'withdrawal' ? `-${amount}` : amount;
+        const description = operation === 'withdrawal'
+          ? `ADMIN_WITHDRAWAL $${amount} FROM ${targetId} BY ADMIN ${adminId}`
+          : `ADMIN_DEPOSIT $${amount} TO ${targetId} BY ADMIN ${adminId}`;
+
+        await conn.execute(
+          `INSERT INTO transaction_history (user_id, recipient_id, amount, description)
+           VALUES (?, NULL, ?, ?)`,
+          [targetId, signedAmount, description]
+        );
+
+        const [[updated]] = await conn.execute(
+          'SELECT balance FROM users WHERE user_id = ?',
+          [targetId]
+        );
+        return { newBalance: updated.balance };
+      });
+
+      await writeLog({
+        userId: adminId,
+        userRole: adminRole,
+        action: auditAction,
+        status: 'success',
+        ipAddress: req.ip,
+      });
+      return res.json({
+        message: operation === 'deposit' ? 'Deposit completed' : 'Withdrawal completed',
+        balance: result.newBalance,
+      });
+    } catch (err) {
+      await writeLog({
+        userId: adminId,
+        userRole: adminRole,
+        action: auditAction,
+        status: 'failure',
+        ipAddress: req.ip,
+      });
+      if (err && err.status && err.json) return res.status(err.status).json(err.json);
+      console.error('[admin-balance-adjustment]', err);
+      return res.status(500).json({ error: 'Balance adjustment failed' });
     }
   }
 );
