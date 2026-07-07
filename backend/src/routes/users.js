@@ -9,7 +9,6 @@ const { generateSecret, generateQRCode, verifyTOTP } = require('../utils/totp');
 
 // Securely borrow the attached decryption engine from your auth module
 const authRouter = require('./auth');
-const decryptSecret = authRouter.decryptSecret;
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 12;
@@ -25,6 +24,18 @@ function encryptSecret(text) {
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
   return `${iv.toString('hex')}:${encrypted}:${authTag}`;
+}
+
+function decryptSecret(text) {
+  if (!text) return null;
+  if (!text.includes(':')) return text;
+
+  const [ivHex, encrypted, tagHex] = text.split(':');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decipher.final('utf8'); // Complete cryptographic validation
+  return decrypted;
 }
 
 // Anti-Replay Cache Registry for Settings Onboarding Flow
