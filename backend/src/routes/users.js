@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { writeLog } = require('../utils/logger');
 const { handleValidation, PATTERNS } = require('../middleware/validation');
 const { generateSecret, generateQRCode, verifyTOTP } = require('../utils/totp');
+const { sendPasswordChangedEmail } = require("../utils/notifications");
 
 // Securely borrow the attached decryption engine from your auth module
 const authRouter = require('./auth');
@@ -162,7 +163,13 @@ router.put(
       }
       const newHash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
       await pool.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
-      await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'success',ipAddress: req.ip });
+      await writeLog({ userId, userRole: 'user', action: 'PASSWORD_CHANGE', status: 'success', ipAddress: req.ip });
+      try {
+        await sendPasswordChangedEmail(req.session.user.email, req.session.user.username);
+      } catch (mailErr) {
+        console.error('[reset-password] failed to send confirmation email:', mailErr);
+      }
+
       res.json({ message: 'Password updated' });
     } catch (err) {
       console.error('[password]', err);
