@@ -604,7 +604,7 @@ router.post('/reset-password', async (req, res) => {
     delete req.session.otpVerified;
     delete req.session.resetEmail;
 
-    // Notify the user their PIN changed. This is best-effort: a mail
+    // Notify the user their Password changed. This is best-effort: a mail
     // failure here must not undo or block the reset that already succeeded.
     try {
       await sendPasswordChangedEmail(email, username);

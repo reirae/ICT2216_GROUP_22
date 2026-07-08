@@ -17,7 +17,7 @@ async function sendPasswordChangedEmail(email, username) {
   await transporter.sendMail({
     from: `"SecureBank" <${process.env.SMTP_USER}>`,
     to: email,
-    subject: "Your PIN was changed",
+    subject: "Your Password was changed",
     html,
   });
 
