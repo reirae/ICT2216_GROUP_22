@@ -16,16 +16,11 @@ interface AdminUser {
   status: 'active' | 'suspended' | 'deactivated';
 }
 
-const blank = { first_name: '', last_name: '', email: '', phone_number: '', username: '', password: '' };
-
 export default function AdminUsers() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [error, setError] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ ...blank });
-  const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = () =>
@@ -57,29 +52,6 @@ export default function AdminUsers() {
     catch (e: any) { setError(e.message); }
   };
 
-  const submitCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError('');
-    if (!PATTERNS.name.test(form.first_name) || !PATTERNS.name.test(form.last_name))
-      return setFormError('Invalid name.');
-    if (!PATTERNS.email.test(form.email)) return setFormError('Invalid email.');
-    if (form.phone_number && !PATTERNS.phone.test(form.phone_number))
-      return setFormError('Invalid phone.');
-    if (!PATTERNS.username.test(form.username)) return setFormError('Invalid username.');
-    if (!PATTERNS.password.test(form.password)) return setFormError('Weak password.');
-    try {
-      await api.post('/admin/users', {
-        ...form,
-        phone_number: form.phone_number || undefined,
-      });
-      setShowAdd(false);
-      setForm({ ...blank });
-      await load();
-    } catch (e: any) {
-      setFormError(e.message);
-    }
-  };
-
   if (loading) return <PageLoader />;
 
   return (
@@ -89,25 +61,6 @@ export default function AdminUsers() {
       </div>
 
       {error && <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">{error}</div>}
-
-      {showAdd && (
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4">
-          <h3 className="text-lg text-gray-800 mb-4">Create User</h3>
-          <form onSubmit={submitCreate} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input placeholder="First name" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} className="px-4 py-2 border rounded-lg" maxLength={50} />
-            <input placeholder="Last name" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} className="px-4 py-2 border rounded-lg" maxLength={50} />
-            <input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="px-4 py-2 border rounded-lg" maxLength={100} />
-            <input placeholder="Phone (optional)" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} className="px-4 py-2 border rounded-lg" maxLength={20} />
-            <input placeholder="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="px-4 py-2 border rounded-lg" maxLength={50} />
-            <input type="password" placeholder="Initial password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="px-4 py-2 border rounded-lg" maxLength={128} />
-            {formError && <div className="md:col-span-2 bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-lg text-sm">{formError}</div>}
-            <div className="md:col-span-2 flex gap-3">
-              <button type="submit" className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">Create</button>
-              <button type="button" onClick={() => { setShowAdd(false); setFormError(''); }} className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400">Cancel</button>
-            </div>
-          </form>
-        </div>
-      )}
 
       <div className="bg-white rounded-lg shadow p-4 mb-4">
         <div className="flex items-center gap-2 mb-3">
