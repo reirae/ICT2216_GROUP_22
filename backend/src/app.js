@@ -18,7 +18,25 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://challenges.cloudflare.com"],
+      frameSrc: ["https://challenges.cloudflare.com"], // Turnstile renders in an iframe
+      connectSrc: ["'self'", "https://challenges.cloudflare.com"], // adjust to your actual API origin if separate
+      styleSrc: ["'self'", "'unsafe-inline'"], // needed if using inline styles (e.g. styled-components, CSS-in-JS)
+      imgSrc: ["'self'", "data:"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"], // prevents clickjacking via iframe embedding
+      formAction: ["'self'"],
+      baseUri: ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+    reportOnly: true, // <-- logs violations instead of blocking; flip to false to enforce
+  },
+}));
 app.use(compression());
 app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ extended: false, limit: '256kb' }));
