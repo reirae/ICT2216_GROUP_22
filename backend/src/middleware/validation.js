@@ -65,7 +65,7 @@ async function verifyCaptcha(req, res, next) {
 function validateSessionPathContext(req, res, next) {
   const currentPath = req.originalUrl || req.url;
 
-  if (currentPath.startsWith('/api/auth')) {
+  if (currentPath.startsWith('/api/auth') && currentPath !== '/api/auth/me') {
     return next();
   }
 

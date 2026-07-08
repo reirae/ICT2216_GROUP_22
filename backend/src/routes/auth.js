@@ -103,6 +103,15 @@ router.get('/captcha', (req, res) => {
 
 router.get('/me', (req, res) => {
   if (req.session && req.session.user) {
+    const clientTabHeader = req.headers['x-account-session-id'];
+    const serverSavedTabId = req.session.tabSessionId;
+
+    // A tab presenting no tab-session header, or the wrong one, must not
+    // receive this session's authenticated user data.
+    if (!clientTabHeader || clientTabHeader !== serverSavedTabId) {
+      return res.status(401).json({ user: null });
+    }
+
     const csrfToken = ensureCsrfToken(req);
     return res.json({ user: req.session.user, csrfToken });
   }
