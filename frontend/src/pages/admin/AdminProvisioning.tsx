@@ -23,7 +23,7 @@ export default function AdminProvisioning() {
     if (!PATTERNS.name.test(firstName)) return setError('Invalid first name format.');
     if (!PATTERNS.name.test(lastName)) return setError('Invalid last name format.');
     if (!PATTERNS.email.test(email)) return setError('Invalid email address format.');
-    if (!PATTERNS.phone.test(phone)) return setError('Invalid phone number format (e.g. +6591234567).');
+    if (!PATTERNS.phone.test(phone)) return setError('Invalid phone number format (e.g. 91234567).');
     if (!PATTERNS.username.test(username)) return setError('Invalid admin username format.');
     if (!PATTERNS.password.test(password)) return setError('Weak password choice.');
 
@@ -104,7 +104,7 @@ export default function AdminProvisioning() {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="+6591234567"
+              placeholder="91234567"
               required
             />
           </div>
@@ -116,7 +116,7 @@ export default function AdminProvisioning() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="business.manager"
+              placeholder="john"
               required
             />
           </div>
