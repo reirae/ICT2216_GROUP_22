@@ -93,24 +93,14 @@ function validateSessionPathContext(req, res, next) {
   const rawRole = req.session.user.role || '';
   const usernameLower = (req.session.user.username || '').toLowerCase();
 
-  // 2. Normalize administrative classifications
-  let effectiveRole = rawRole;
-  if (rawRole === 'admin') {
-    if (usernameLower.includes('bus') || usernameLower.includes('business')) {
-      effectiveRole = 'business_admin';
-    } else {
-      effectiveRole = 'it_admin';
-    }
-  }
-
-  const isAdminGroup = effectiveRole === 'business_admin' || effectiveRole === 'it_admin';
+  const isAdminGroup = rawRole === 'business_admin' || rawRole === 'it_admin';
 
   // 3. SECURE CROSS-POLLINATION GATE:
   // Threat Vector A: An admin profile tries to trigger regular customer user routes
   // Threat Vector B: A regular customer cookie tries to fetch admin control endpoints
   const isCrossPollinatedSession = 
     (isApiAdminRoute && !isAdminGroup) || 
-    (!isApiAdminRoute && currentPath.startsWith('/api/user') && effectiveRole !== 'user');
+    (!isApiAdminRoute && currentPath.startsWith('/api/user') && rawRole !== 'user');
 
   if (isCrossPollinatedSession) {
     // Force complete server-side destruction of the mismatched session context

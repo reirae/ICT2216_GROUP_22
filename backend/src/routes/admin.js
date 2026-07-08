@@ -18,14 +18,13 @@ const requireAdminRole = (allowedRoles) => {
 
     const role = req.session.user.role;
 
-    // Allow generic 'admin' role to act as a Super Admin bypass, 
-    // or verify if their specific sub-role is allowed
-    if (role !== 'admin' && !allowedRoles.includes(role)) {
+    if (!allowedRoles.includes(role)) {
       return res.status(403).json({ error: 'Access denied: Insufficient administrative privileges.' });
     }
     next();
   };
 };
+
 
 /* ==========================================================================
    BUSINESS ADMIN ROUTES (User Management & Transactions)
@@ -51,49 +50,7 @@ router.get('/users', requireAuth(), requireAdminRole(['business_admin']), async 
   }
 });
 
-// Create banking user (Business Admin)
-// FIXED: Removed 'admin' string restriction constraint from requireAuth
-router.post(
-  '/users',
-  requireAuth(),
-  requireAdminRole(['business_admin']),
-  [
-    body('username').matches(PATTERNS.username),
-    body('password').matches(PATTERNS.password),
-    body('first_name').matches(PATTERNS.name),
-    body('last_name').matches(PATTERNS.name),
-    body('email').matches(PATTERNS.email),
-    body('phone_number').optional({ checkFalsy: true }).matches(PATTERNS.phone),
-  ],
-  handleValidation,
-  async (req, res) => {
-    const { username, password, first_name, last_name, email, phone_number } = req.body;
-    try {
-      const [dupes] = await pool.execute(
-        'SELECT user_id FROM users WHERE username = ? OR email = ? OR phone_number = ? LIMIT 1',
-        [username, email, phone_number || null]
-      );
-      if (dupes.length) {
-        await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'USER_CREATE', status: 'failure', ipAddress: req.ip });
-        return res.status(409).json({ error: 'Username, email, or phone number already exists' });
-      }
 
-      const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-      const accountNumber = randomAcct();
-      await pool.execute(
-        `INSERT INTO users (username, password_hash, first_name, last_name, email, phone_number, account_number, balance, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active')`,
-        [username, hash, first_name, last_name, email, phone_number || null, accountNumber]
-      );
-      await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'USER_CREATE', status: 'success', ipAddress: req.ip });
-      res.status(201).json({ message: 'User created' });
-    } catch (err) {
-      console.error('[admin-users-create]', err);
-      await writeLog({ userId: req.session.user.id, userRole: req.session.user.role, action: 'USER_CREATE', status: 'failure', ipAddress: req.ip });
-      res.status(500).json({ error: 'Failed to create user' });
-    }
-  }
-);
 
 // Update user status only (Business Admin) — separated from profile edits for auditability
 router.put(
