@@ -235,7 +235,7 @@ router.post('/register', async (req, res) => {
 
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
-      writeLog({ userRole: 'user', action: 'REGISTER', status: 'success', ipAddress: req.ip});
+      writeLog({ userRole: 'user', action: 'REGISTER', status: 'success', ipAddress: req.ip });
       res.status(201).json({ message: 'Account created. You can now sign in.' });
     });
   } catch (err) {
@@ -259,7 +259,7 @@ router.post(
 );
 
 router.post('/verify-otp', async (req, res) => {
-  const { otp, tempSecret , mfaToken} = req.body;
+  const { otp, tempSecret, mfaToken } = req.body;
 
   const pendingUser = mfaToken ? parseMfaToken(mfaToken) : null;
 
@@ -267,7 +267,7 @@ router.post('/verify-otp', async (req, res) => {
     await writeLog({ userRole: 'user', action: 'LOGIN_2FA', status: 'failure', ipAddress: req.ip });
     return res.status(401).json({ error: 'Invalid verification session. Please sign in again.' });
   }
-  
+
   // Decrypt the master secret from storage session frame safely at runtime evaluation loop
   const activeSecret = pendingUser.isSetupPending
     ? tempSecret
@@ -290,7 +290,7 @@ router.post('/verify-otp', async (req, res) => {
 
     // Lockout function: Clears token context entirely after 3 failures
     if (currentAttempts >= 3) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Too many failed attempts. Please sign in again.',
         clearMfaState: true // Flags frontend to wipe local MFA components
       });
@@ -301,7 +301,7 @@ router.post('/verify-otp', async (req, res) => {
     delete updatedUserPayload.exp; // generateMfaToken sets a fresh lifespan window
     const newMfaToken = generateMfaToken(updatedUserPayload);
 
-    return res.status(401).json({ 
+    return res.status(401).json({
       error: 'Invalid verification code.',
       attemptsRemaining: 3 - currentAttempts,
       mfaToken: newMfaToken // Update token context in frontend state container
@@ -313,7 +313,7 @@ router.post('/verify-otp', async (req, res) => {
   setTimeout(() => {
     usedTokensCache.delete(replayCacheKey);
   }, 60000); // Blocks this specific token for exactly 60 seconds
-  
+
   const userId = pendingUser.id;
 
   try {
@@ -352,11 +352,11 @@ router.post('/verify-otp', async (req, res) => {
 
       // single active session per user: storing session id in the database
       // Get the fresh session ID from the regenerated session frame
-      const newSessionId = req.sessionID; 
+      const newSessionId = req.sessionID;
       const isAdminRow = finalUser.role !== 'user';
       const targetTable = isAdminRow ? 'admins' : 'users';
       const targetIdColumn = isAdminRow ? 'admin_id' : 'user_id';
-      
+
       try {
         // Enforce single active session by updating the database record
         await pool.execute(
@@ -395,7 +395,7 @@ router.post(
 
 router.post('/logout', requireAuth(), async (req, res) => {
   const { id, role } = req.session.user;
-  
+
   // single active session per user: session id removal from database
   const isAdminRow = role !== 'user';
   const table = isAdminRow ? 'admins' : 'users';
@@ -407,7 +407,7 @@ router.post('/logout', requireAuth(), async (req, res) => {
   } catch (dbErr) {
     console.error('Failed to clear session ID on logout:', dbErr);
   }
-  
+
   req.session.destroy(async (err) => {
     if (err) {
       await writeLog({ userId: id, userRole: role, action: 'LOGOUT', status: 'failure', ipAddress: req.ip });
@@ -500,6 +500,8 @@ async function handleLogin(req, res, role) {
 
     req.session.regenerate(async (err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
+
+      const tabSessionId = crypto.randomBytes(16).toString('hex');
       req.session.user = {
         id: String(account[idCol]),
         username: account.username,
@@ -510,6 +512,7 @@ async function handleLogin(req, res, role) {
         account_number: account.account_number || null,
       };
 
+      req.session.tabSessionId = tabSessionId;
       req.session.createdAt = Date.now();
       const csrfToken = ensureCsrfToken(req);
 
@@ -528,7 +531,7 @@ async function handleLogin(req, res, role) {
       req.session.save(async (saveErr) => {
         if (saveErr) return res.status(500).json({ error: 'Session save failure' });
         writeLog({ userId: req.session.user.id, userRole: account.role || role, action: 'LOGIN', status: 'success', ipAddress: req.ip });
-        res.json({ user: req.session.user, csrfToken });
+        res.json({ user: req.session.user, csrfToken, tabSessionId });
       });
     });
   } catch (err) {
@@ -665,4 +668,4 @@ router.post("/email-verify-otp", (req, res) => {
   }
 });
 
-module.exports = {handleLogin, router, generateMfaToken, parseMfaToken};
+module.exports = { handleLogin, router, generateMfaToken, parseMfaToken };
