@@ -45,6 +45,10 @@ jobs:
         run: npm run lint
 
       - name: Unit tests
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: ${{ secrets.TEST_SESSION_SECRET }}
+          DB_ENCRYPTION_KEY: ${{ secrets.TEST_DB_ENCRYPTION_KEY }}
         run: npm test
 
       - name: Dependency audit (production deps)
