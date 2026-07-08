@@ -21,7 +21,10 @@ const LOCK_THRESHOLD = Number(process.env.ACCOUNT_LOCK_THRESHOLD || 5);
 const LOCK_MINUTES = Number(process.env.ACCOUNT_LOCK_MINUTES || 15);
 const BCRYPT_ROUNDS = 12;
 
-const ENCRYPTION_KEY = Buffer.from(process.env.DB_ENCRYPTION_KEY || '0'.repeat(64), 'hex');
+// No fallback — app.js validates DB_ENCRYPTION_KEY exists and is a valid
+// 64-char hex string at startup (before any routes are loaded), so it's
+// guaranteed to be safe to use here.
+const ENCRYPTION_KEY = Buffer.from(process.env.DB_ENCRYPTION_KEY, 'hex');
 const IV_LENGTH = 16;
 
 // Anti-Replay Cache Registry
