@@ -665,21 +665,4 @@ router.post("/email-verify-otp", (req, res) => {
   }
 });
 
-router.post('/generate-onboarding-2fa', async (req, res) => {
-  try {
-    if (!req.session.pendingUser || !req.session.pendingUser.isSetupPending) {
-      return res.status(403).json({ error: 'Access denied. Session parameters are out of bounds.' });
-    }
-
-    const { username } = req.session.pendingUser;
-    const secret = require('../utils/totp').generateSecret();
-    const qrCode = await require('../utils/totp').generateQRCode(username, secret);
-
-    res.json({ qrCode, tempSecret: secret });
-  } catch (err) {
-    console.error('[generate-onboarding-2fa]', err);
-    res.status(500).json({ error: 'Failed to safely generate onboarding security streams.' });
-  }
-});
-
 module.exports = {handleLogin, router, generateMfaToken, parseMfaToken};
