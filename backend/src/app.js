@@ -60,7 +60,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "https://challenges.cloudflare.com"],
       frameSrc: ["https://challenges.cloudflare.com"], // Turnstile renders in an iframe
-      connectSrc: ["'self'", "https://challenges.cloudflare.com"], // adjust to your actual API origin if separate
+      connectSrc: ["'self'", "https://challenges.cloudflare.com"],
       styleSrc: ["'self'", "'unsafe-inline'"], // needed if using inline styles (e.g. styled-components, CSS-in-JS)
       imgSrc: ["'self'", "data:"],
       fontSrc: ["'self'"],
@@ -70,7 +70,6 @@ app.use(helmet({
       baseUri: ["'self'"],
       upgradeInsecureRequests: [],
     },
-    reportOnly: true, // <-- logs violations instead of blocking; flip to false to enforce
   },
 }));
 app.use(compression());
