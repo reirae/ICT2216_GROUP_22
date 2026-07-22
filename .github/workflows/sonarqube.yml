@@ -2,7 +2,7 @@ name: SonarQube Analysis
 
 on:
   push:
-    branches: [ dev ]        # was 'master' — GitHub default branch is 'main'
+    branches: [ dev ]
   pull_request:
     branches: [ dev ]
 
@@ -17,21 +17,40 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Start SonarQube
+        run: docker compose -f sonarqube-compose.yml up -d
+
+      - name: Wait for SonarQube to be ready
+        run: |
+          until curl -s http://localhost:9000/api/system/status | grep -q '"status":"UP"'; do
+            echo "Waiting for SonarQube..."
+            sleep 10
+          done
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: npm install
-        working-directory: ./frontend
+        working-directory: ./frontend   # adjust per folder
 
-      - name: Install backend dependencies
-        run: npm install
-        working-directory: ./backend
+      - name: Generate SonarQube token
+        id: token
+        run: |
+          TOKEN=$(curl -s -u admin:admin -X POST \
+            "http://localhost:9000/api/user_tokens/generate?name=ci-token" | \
+            grep -o '"token":"[^"]*' | cut -d'"' -f4)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v8
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ steps.token.outputs.token }}
+          SONAR_HOST_URL: http://localhost:9000
+
+      - name: Stop SonarQube
+        if: always()
+        run: docker compose -f sonarqube-compose.yml down
