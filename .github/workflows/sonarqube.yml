@@ -2,9 +2,9 @@ name: SonarQube Analysis
 
 on:
   push:
-    branches: [ main ]        # was 'master' — GitHub default branch is 'main'
+    branches: [ dev ]        # was 'master' — GitHub default branch is 'main'
   pull_request:
-    branches: [ main ]
+    branches: [ dev ]
 
 jobs:
   sonarqube:
